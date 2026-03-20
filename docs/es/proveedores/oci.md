@@ -183,12 +183,74 @@ var result = await _storage.UploadAsync(new UploadRequest
 
 ---
 
+## URLs prefirmadas (Pre-Authenticated Requests)
+
+`OCIStorageProvider` implementa `IPresignedUrlProvider` usando OCI **Pre-Authenticated Requests (PARs)**.
+
+### Diferencia con AWS/GCP
+
+| | AWS S3 / GCP Cloud Storage | OCI Object Storage |
+|---|---|---|
+| **Cómo se genera la URL** | Se firma localmente en memoria con tus credenciales — **sin llamada de red** | Se crea un objeto PAR en los servidores de OCI via API — requiere un round-trip |
+| **Costo de red por URL** | Cero — operación puramente en CPU | Una llamada HTTP a OCI por cada URL generada |
+| **Latencia** | Sub-milisegundo | Depende de la latencia de red hacia OCI (~50–200 ms) |
+| **Ciclo de vida server-side** | Sin estado — el cloud no registra la URL | El PAR es un objeto real: puede listarse, desactivarse o eliminarse desde la Consola o CLI |
+| **Rate limits** | Ninguno para generación de URLs | OCI aplica rate limits a la creación de PARs |
+
+En cargas de trabajo de baja o moderada frecuencia, el round-trip adicional es despreciable. Para generación de URLs de alta frecuencia, ver la nota de caché más abajo.
+
+### Uso
+
+```csharp
+var provider = factory.Create("oci");
+
+if (provider is IPresignedUrlProvider presigned)
+{
+    // Crea un PAR en OCI con acceso PUT por 15 minutos
+    var uploadUrl = await presigned.GetPresignedUploadUrlAsync(
+        StoragePath.From("uploads", userId, "reporte.pdf"),
+        expiresIn: TimeSpan.FromMinutes(15));
+
+    // Crea un PAR en OCI con acceso GET por 2 horas
+    var downloadUrl = await presigned.GetPresignedDownloadUrlAsync(
+        "privado/reporte.pdf",
+        expiresIn: TimeSpan.FromHours(2));
+}
+```
+
+### Caché de PARs
+
+Dado que cada generación de URL hace una llamada HTTP a OCI, cacheá la URL cuando el mismo usuario accede al mismo recurso repetidamente dentro de la ventana de validez. Siempre incluí el usuario en la clave de caché — un PAR otorga acceso sin autenticación durante toda su vida útil, por lo que compartirlo entre usuarios distintos es un riesgo de seguridad.
+
+```csharp
+var cacheKey = $"oci-par:{userId}:{path}";
+if (!cache.TryGetValue(cacheKey, out string? url))
+{
+    var expiration = TimeSpan.FromHours(2);
+    var result = await presigned.GetPresignedDownloadUrlAsync(path, expiration);
+    url = result.Value;
+    cache.Set(cacheKey, url, expiration * 0.9);
+}
+```
+
+### Ciclo de vida de PARs
+
+Los PARs son objetos reales en el servidor de OCI. Podés verlos, desactivarlos o eliminarlos en **Storage → Buckets → \<bucket\> → Pre-Authenticated Requests** en la Consola OCI, o vía CLI:
+
+```bash
+oci os preauth-request list --bucket-name mi-bucket --namespace mi-namespace
+```
+
+Esto permite revocar el acceso a una URL después de haberla emitido — algo que no es posible con AWS ni GCP.
+
+---
+
 ## Limitaciones
 
 | Limitación | Detalle |
 |---|---|
 | `SetMetadataAsync` | Retorna `NotSupported` — re-subí el objeto con la nueva metadata |
 | Tamaño máximo de objeto | 10 TB |
-| URLs prefirmadas | OCI soporta Pre-Authenticated Requests (PARs). ValiBlob expone esto via `IPresignedUrlProvider` |
+| PARs (URLs prefirmadas) | Requieren una llamada HTTP a OCI por cada URL generada (no hay firma local) |
 | Namespace | Es único por tenancy y no puede cambiarse |
 | Visibilidad de buckets | Los buckets pueden ser públicos o privados. La visibilidad se configura en la Consola OCI, no en ValiBlob |
