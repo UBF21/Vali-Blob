@@ -2,7 +2,7 @@
 
 Oracle Cloud Infrastructure (OCI) Object Storage provider for ValiBlob.
 
-Supports standard object operations and resumable uploads. Metadata can only be set at upload time — in-place metadata updates are not supported by OCI Object Storage.
+Supports standard object operations, resumable uploads (OCI multipart upload), and presigned URLs via OCI **Pre-Authenticated Requests (PARs)**. Unlike AWS and GCP, presigned URLs in OCI require an API call to create each PAR — there is no local signing. Metadata can only be set at upload time — in-place metadata updates are not supported by OCI Object Storage.
 
 ## Install
 
@@ -50,10 +50,10 @@ builder.Services
 | Upload / Download / Delete / List | Yes |
 | Metadata (set at upload time) | Yes |
 | In-place metadata update | No — re-upload required |
-| Presigned URLs | No |
+| Presigned URLs | Yes — via OCI Pre-Authenticated Requests (PARs) |
 | Resumable uploads (chunked) | Yes |
 | BucketOverride per request | Yes |
 
 ## Documentation
 
-[OCI Object Storage provider docs](../../docs/en/providers/oci.md)
+[OCI Object Storage provider docs](https://vali-blob-docs.netlify.app/docs/providers/oci)
