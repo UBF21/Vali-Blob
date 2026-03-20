@@ -8,16 +8,16 @@
     <FileVersion>1.0.0.0</FileVersion>
 
     <!-- NuGet identity -->
-    <Authors>The ValiBlob Contributors</Authors>
+    <Authors>Felipe Rafael Montenegro Morriberon</Authors>
     <Company>ValiBlob</Company>
     <Product>ValiBlob</Product>
-    <Copyright>Copyright © 2026 The ValiBlob Contributors</Copyright>
-    <PackageProjectUrl>https://github.com/valiblob/valiblob</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/valiblob/valiblob</RepositoryUrl>
+    <Copyright>Copyright © 2026 Felipe Rafael Montenegro Morriberon</Copyright>
+    <PackageProjectUrl>https://github.com/UBF21/Vali-Blob</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/UBF21/Vali-Blob</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <PackageReleaseNotes>See CHANGELOG.md at https://github.com/valiblob/valiblob/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <PackageReleaseNotes>See CHANGELOG.md at https://github.com/UBF21/Vali-Blob/blob/main/CHANGELOG.md</PackageReleaseNotes>
 
     <!-- Package icon -->
     <PackageIcon>icon.png</PackageIcon>

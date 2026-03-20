@@ -1,6 +1,6 @@
 # ValiBlob.EntityFramework
 
-Entity Framework Core session store for [ValiBlob](https://github.com/valiblob/valiblob) resumable uploads.
+Entity Framework Core session store for [ValiBlob](https://github.com/UBF21/Vali-Blob) resumable uploads.
 
 The default `InMemoryResumableSessionStore` loses all upload sessions on process restart. This package persists sessions to any EF Core-supported relational database (SQL Server, PostgreSQL, SQLite, MySQL, etc.).
 

@@ -1,6 +1,6 @@
 # ValiBlob.Redis
 
-Redis-backed resumable upload session store for [ValiBlob](https://github.com/valiblob/valiblob).
+Redis-backed resumable upload session store for [ValiBlob](https://github.com/UBF21/Vali-Blob).
 
 The default `InMemoryResumableSessionStore` loses all upload sessions on process restart. This package replaces it with a Redis store that survives restarts and works correctly across multiple application instances.
 
