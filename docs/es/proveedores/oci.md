@@ -150,24 +150,21 @@ builder.Services
 
 ---
 
-## Limitación de `SetMetadata` (requiere re-subida)
+## Limitación de `SetMetadata`
 
-> **⚠️ Advertencia:** OCI Object Storage no soporta actualizar metadata de un objeto existente in-place. La única manera de cambiar la metadata es re-subir el objeto con la nueva metadata.
-
-ValiBlob maneja esto automáticamente en `SetMetadataAsync`: descarga el objeto, lo re-sube con la nueva metadata y elimina la versión anterior. Sin embargo, esto implica tráfico de datos adicional proporcional al tamaño del archivo.
-
-**Recomendación:** Si tu caso de uso requiere actualizar metadata frecuentemente en archivos grandes, considerá usar Azure Blob Storage o GCS, que soportan actualizaciones de metadata in-place.
+OCI Object Storage no soporta actualizar metadata de un objeto existente in-place. `SetMetadataAsync` en el proveedor OCI **retorna `NotSupported` directamente** — no descarga ni re-sube el objeto automáticamente.
 
 ```csharp
-// Esta operación en OCI descarga y re-sube el archivo internamente
-var result = await _storage.SetMetadataAsync(
-    "documentos/contrato.pdf",
-    new Dictionary<string, string>
-    {
-        { "estado", "aprobado" },
-        { "revisor", "gerencia" }
-    });
+var result = await _storage.SetMetadataAsync("documentos/contrato.pdf", metadata);
+
+if (!result.IsSuccess && result.ErrorCode == StorageErrorCode.NotSupported)
+{
+    // OCI no soporta actualización de metadata in-place.
+    // Para cambiar metadata debés re-subir el objeto con los nuevos valores.
+}
 ```
+
+Para actualizar metadata en OCI, re-subí el objeto incluyendo la metadata deseada en `UploadRequest.Metadata`. Si tu caso de uso requiere actualizaciones frecuentes de metadata, considerá usar Azure Blob Storage o GCP, que sí soportan actualizaciones in-place.
 
 ---
 
@@ -190,7 +187,7 @@ var result = await _storage.UploadAsync(new UploadRequest
 
 | Limitación | Detalle |
 |---|---|
-| `SetMetadataAsync` | Requiere re-subir el objeto completo (ver sección anterior) |
+| `SetMetadataAsync` | Retorna `NotSupported` — re-subí el objeto con la nueva metadata |
 | Tamaño máximo de objeto | 10 TB |
 | URLs prefirmadas | OCI soporta Pre-Authenticated Requests (PARs). ValiBlob expone esto via `IPresignedUrlProvider` |
 | Namespace | Es único por tenancy y no puede cambiarse |

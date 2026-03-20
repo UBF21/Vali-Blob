@@ -131,12 +131,19 @@ builder.Services
 
 ## `SetMetadataAsync` limitation
 
-OCI Object Storage does not support in-place metadata updates. The OCI provider handles `SetMetadataAsync` by performing a server-side copy of the object with the new metadata — this is transparent to the caller but has cost and latency implications:
+OCI Object Storage does not support in-place metadata updates. `SetMetadataAsync` on the OCI provider returns a `StorageResult` with `StorageErrorCode.NotSupported` — it does not attempt a re-upload or server-side copy.
 
-1. A `CopyObject` operation is performed (billed as a PUT request)
-2. The original object is deleted
+```csharp
+var result = await _storage.SetMetadataAsync("uploads/file.pdf", metadata);
 
-For workloads that update metadata frequently, consider encoding metadata in the object path or as part of a separate index record.
+if (!result.IsSuccess && result.ErrorCode == StorageErrorCode.NotSupported)
+{
+    // OCI does not support in-place metadata updates.
+    // To change metadata you must re-upload the object with the new metadata values.
+}
+```
+
+To update metadata on an existing OCI object, re-upload it with the desired metadata set in `UploadRequest.Metadata`. For workloads that update metadata frequently, consider encoding it in the object path or storing it in a separate index.
 
 ---
 
@@ -168,7 +175,7 @@ oci os ns get
 
 ## Limitations
 
-- `SetMetadataAsync` requires a server-side copy — see the dedicated section above.
+- `SetMetadataAsync` returns `NotSupported` — OCI does not allow in-place metadata updates. Re-upload the object with the new metadata instead.
 - OCI Object Storage object names are limited to 1024 bytes.
 - Presigned URLs (pre-authenticated requests) have a maximum expiry of 7 days from creation.
 - The OCI SDK for .NET does not support passwordless private keys when using `FilePrivateKeySupplier`. Ensure the PEM file is not password-protected, or handle decryption before providing the key content.
