@@ -6,6 +6,7 @@
     <Description>Oracle Cloud Infrastructure Object Storage provider for ValiBlob</Description>
     <PackageTags>storage;cloud;oci;oracle;blob;abstraction</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/providers/oci</PackageProjectUrl>
   </PropertyGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />

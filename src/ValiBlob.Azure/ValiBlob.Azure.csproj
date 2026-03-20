@@ -6,6 +6,7 @@
     <Description>Azure Blob Storage provider for ValiBlob</Description>
     <PackageTags>storage;cloud;azure;blob;abstraction</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/providers/azure</PackageProjectUrl>
   </PropertyGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />

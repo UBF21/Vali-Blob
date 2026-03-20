@@ -6,6 +6,7 @@
     <Description>Local filesystem storage provider for ValiBlob — ideal for development and testing</Description>
     <PackageTags>storage;local;filesystem;development;testing;valiblob</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/providers/local</PackageProjectUrl>
   </PropertyGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />

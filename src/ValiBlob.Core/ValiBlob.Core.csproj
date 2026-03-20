@@ -6,6 +6,7 @@
     <Description>Core abstractions and contracts for ValiBlob — cloud storage provider abstraction for .NET</Description>
     <PackageTags>storage;cloud;azure;aws;gcp;oci;blob;abstraction</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/</PackageProjectUrl>
   </PropertyGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />

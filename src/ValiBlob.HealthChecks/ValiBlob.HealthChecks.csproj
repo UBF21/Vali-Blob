@@ -6,6 +6,7 @@
     <Description>ASP.NET Core Health Checks integration for ValiBlob</Description>
     <PackageTags>storage;cloud;healthchecks;valiblob</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/advanced/health-checks</PackageProjectUrl>
   </PropertyGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />

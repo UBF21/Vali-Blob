@@ -6,6 +6,7 @@
     <Description>In-memory storage provider and testing utilities for ValiBlob</Description>
     <PackageTags>storage;testing;inmemory;mock;valiblob</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/advanced/testing</PackageProjectUrl>
   </PropertyGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />

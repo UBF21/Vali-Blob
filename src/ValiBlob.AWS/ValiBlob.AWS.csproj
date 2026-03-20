@@ -6,6 +6,7 @@
     <Description>AWS S3 provider for ValiBlob</Description>
     <PackageTags>storage;cloud;aws;s3;blob;abstraction</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/providers/aws</PackageProjectUrl>
   </PropertyGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />

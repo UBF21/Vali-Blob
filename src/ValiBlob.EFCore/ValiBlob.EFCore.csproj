@@ -6,6 +6,7 @@
     <Description>Entity Framework Core session store for ValiBlob resumable uploads</Description>
     <PackageTags>storage;cloud;efcore;entityframework;resumable;valiblob</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/resumable/efcore-store</PackageProjectUrl>
   </PropertyGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />

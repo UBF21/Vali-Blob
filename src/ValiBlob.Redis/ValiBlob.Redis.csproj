@@ -6,6 +6,7 @@
     <Description>Redis-backed resumable upload session store for ValiBlob</Description>
     <PackageTags>storage;cloud;redis;resumable;valiblob</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/resumable/redis-store</PackageProjectUrl>
   </PropertyGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
