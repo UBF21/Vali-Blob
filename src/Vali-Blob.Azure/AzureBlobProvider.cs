@@ -66,7 +66,7 @@ public sealed class AzureBlobProvider : BaseStorageProvider, IPresignedUrlProvid
             Metadata = request.Metadata?.ToDictionary(k => k.Key, v => v.Value),
             TransferOptions = new StorageTransferOptions
             {
-                MaximumTransferSize = 4 * 1024 * 1024 // 4MB chunks
+                MaximumTransferSize = _options.MultipartChunkSizeMb * 1024 * 1024
             }
         };
 

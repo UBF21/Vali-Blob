@@ -2,12 +2,12 @@ namespace ValiBlob.Core.Options;
 
 /// <summary>
 /// Global configuration for resumable (multi-chunk) uploads across all providers.
-/// Bind to configuration section "ValiStorage:ResumableUpload" or configure via
+/// Bind to configuration section "ValiBlob:ResumableUpload" or configure via
 /// <c>builder.WithResumableUploads(o => { ... })</c>.
 /// </summary>
 public sealed class ResumableUploadOptions
 {
-    public const string SectionName = "ValiStorage:ResumableUpload";
+    public const string SectionName = "ValiBlob:ResumableUpload";
 
     /// <summary>
     /// Default chunk size in bytes sent per UploadChunkAsync call when no per-request override is given.

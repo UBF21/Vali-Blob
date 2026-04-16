@@ -42,6 +42,9 @@ public sealed class OCIStorageProvider : BaseStorageProvider, IResumableUploadPr
 
     public override string ProviderName => "OCI";
 
+    private string GetServiceBaseUrl() =>
+        _options.ServiceUrl ?? $"https://objectstorage.{_options.Region}.oraclecloud.com";
+
     protected override async Task<StorageResult<UploadResult>> UploadCoreAsync(
         UploadRequest request,
         IProgress<UploadProgress>? progress,
@@ -125,7 +128,7 @@ public sealed class OCIStorageProvider : BaseStorageProvider, IResumableUploadPr
     {
         var url = _options.CdnBaseUrl is not null
             ? $"{_options.CdnBaseUrl.TrimEnd('/')}/{path}"
-            : $"https://objectstorage.{_options.Region}.oraclecloud.com/n/{_options.Namespace}/b/{_options.Bucket}/o/{path}";
+            : $"{GetServiceBaseUrl()}/n/{_options.Namespace}/b/{_options.Bucket}/o/{path}";
 
         return Task.FromResult(StorageResult<string>.Success(url));
     }
@@ -437,7 +440,7 @@ public sealed class OCIStorageProvider : BaseStorageProvider, IResumableUploadPr
                     }
                 });
 
-            var url = $"https://objectstorage.{_options.Region}.oraclecloud.com{response.PreauthenticatedRequest.AccessUri}";
+            var url = $"{GetServiceBaseUrl()}{response.PreauthenticatedRequest.AccessUri}";
             return StorageResult<string>.Success(url);
         }
         catch (Exception ex)
@@ -466,7 +469,7 @@ public sealed class OCIStorageProvider : BaseStorageProvider, IResumableUploadPr
                     }
                 });
 
-            var url = $"https://objectstorage.{_options.Region}.oraclecloud.com{response.PreauthenticatedRequest.AccessUri}";
+            var url = $"{GetServiceBaseUrl()}{response.PreauthenticatedRequest.AccessUri}";
             return StorageResult<string>.Success(url);
         }
         catch (Exception ex)

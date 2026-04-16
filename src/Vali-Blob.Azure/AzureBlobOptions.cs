@@ -8,6 +8,8 @@ public sealed class AzureBlobOptions
     public string? AccountName { get; set; }
     public string? AccountKey { get; set; }
     public string Container { get; set; } = string.Empty;
+    public string? ServiceUrl { get; set; }
     public string? CdnBaseUrl { get; set; }
+    public int MultipartChunkSizeMb { get; set; } = 4;
     public bool CreateContainerIfNotExists { get; set; } = true;
 }

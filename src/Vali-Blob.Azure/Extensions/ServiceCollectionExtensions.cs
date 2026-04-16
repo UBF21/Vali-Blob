@@ -30,8 +30,8 @@ public static class ServiceCollectionExtensions
             if (!string.IsNullOrWhiteSpace(opts.AccountName) && !string.IsNullOrWhiteSpace(opts.AccountKey))
             {
                 var credential = new StorageSharedKeyCredential(opts.AccountName, opts.AccountKey);
-                return new BlobServiceClient(
-                    new Uri($"https://{opts.AccountName}.blob.core.windows.net"), credential);
+                var serviceUrl = opts.ServiceUrl ?? $"https://{opts.AccountName}.blob.core.windows.net";
+                return new BlobServiceClient(new Uri(serviceUrl), credential);
             }
 
             throw new InvalidOperationException(
