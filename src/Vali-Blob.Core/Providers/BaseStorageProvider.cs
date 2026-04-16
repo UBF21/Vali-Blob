@@ -8,14 +8,12 @@ using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Polly;
-using Polly.CircuitBreaker;
-using Polly.Retry;
-using Polly.Timeout;
 using ValiBlob.Core.Abstractions;
 using ValiBlob.Core.Events;
 using ValiBlob.Core.Models;
 using ValiBlob.Core.Options;
 using ValiBlob.Core.Pipeline;
+using ValiBlob.Core.Resilience;
 using ValiBlob.Core.Telemetry;
 
 namespace ValiBlob.Core.Providers;
@@ -42,7 +40,8 @@ public abstract class BaseStorageProvider : IStorageProvider
         _encryptionOptions = encryptionOptions.Value;
         _pipeline = pipeline;
         _httpClientFactory = httpClientFactory;
-        _lazyResiliencePipeline = new Lazy<ResiliencePipeline>(BuildResiliencePipeline);
+        _lazyResiliencePipeline = new Lazy<ResiliencePipeline>(() =>
+            ResiliencePipelineFactory.BuildPipeline(_resilienceOptions, Logger, ProviderName));
     }
 
     internal void SetEventDispatcher(StorageEventDispatcher dispatcher)
@@ -669,44 +668,4 @@ public abstract class BaseStorageProvider : IStorageProvider
             cancellationToken);
     }
 
-    private ResiliencePipeline BuildResiliencePipeline()
-    {
-        var builder = new ResiliencePipelineBuilder();
-
-        builder.AddTimeout(new TimeoutStrategyOptions
-        {
-            Timeout = _resilienceOptions.Timeout
-        });
-
-        builder.AddRetry(new RetryStrategyOptions
-        {
-            MaxRetryAttempts = _resilienceOptions.RetryCount,
-            Delay = _resilienceOptions.RetryDelay,
-            UseJitter = true,
-            BackoffType = _resilienceOptions.UseExponentialBackoff
-                ? DelayBackoffType.Exponential
-                : DelayBackoffType.Constant,
-            OnRetry = args =>
-            {
-                Logger.LogWarning("[{Provider}] Retry attempt {Attempt} after {Delay}ms",
-                    ProviderName, args.AttemptNumber, args.RetryDelay.TotalMilliseconds);
-                return default;
-            }
-        });
-
-        builder.AddCircuitBreaker(new CircuitBreakerStrategyOptions
-        {
-            FailureRatio = 0.5,
-            MinimumThroughput = _resilienceOptions.CircuitBreakerThreshold,
-            BreakDuration = _resilienceOptions.CircuitBreakerDuration,
-            OnOpened = args =>
-            {
-                Logger.LogError("[{Provider}] Circuit breaker opened for {Duration}s",
-                    ProviderName, args.BreakDuration.TotalSeconds);
-                return default;
-            }
-        });
-
-        return builder.Build();
-    }
 }
