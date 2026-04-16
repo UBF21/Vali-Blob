@@ -588,7 +588,7 @@ public sealed class LocalStorageProvider : BaseStorageProvider, IResumableUpload
         });
     }
 
-    public Task<StorageResult<ResumableUploadStatus>> GetUploadStatusAsync(
+    public override Task<StorageResult<ResumableUploadStatus>> GetUploadStatusAsync(
         string uploadId,
         CancellationToken cancellationToken = default)
     {

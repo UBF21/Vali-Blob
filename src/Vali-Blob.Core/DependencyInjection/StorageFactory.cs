@@ -33,11 +33,30 @@ public sealed class StorageFactory : IStorageFactory
 
     public IStorageProvider Create<TProvider>() where TProvider : IStorageProvider
     {
+        var typeName = typeof(TProvider).Name;
+        var keyedProvider = _serviceProvider.GetKeyedService<IStorageProvider>(typeName);
+        if (keyedProvider is not null)
+            return keyedProvider;
+
         return _serviceProvider.GetRequiredService<TProvider>();
     }
 
     public IEnumerable<IStorageProvider> GetAll()
     {
+        if (_serviceProvider is IKeyedServiceProvider keyedProvider)
+        {
+            var providers = new List<IStorageProvider>();
+
+            foreach (var providerKey in new[] { "Local", "InMemory", "AWS", "Azure", "GCP", "OCI", "Supabase" })
+            {
+                var provider = _serviceProvider.GetKeyedService<IStorageProvider>(providerKey);
+                if (provider is not null)
+                    providers.Add(provider);
+            }
+
+            return providers;
+        }
+
         return _serviceProvider.GetServices<IStorageProvider>();
     }
 }

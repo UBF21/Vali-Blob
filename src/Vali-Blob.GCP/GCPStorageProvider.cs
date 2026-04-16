@@ -260,25 +260,8 @@ public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadPr
                 return StorageResult<ChunkUploadResult>.Failure("Buffer for upload session not found. Was the process restarted?", StorageErrorCode.ProviderError);
             }
 
-            byte[] chunkBytes;
-            if (request.Length.HasValue)
-            {
-                chunkBytes = new byte[request.Length.Value];
-                var read = 0;
-                while (read < chunkBytes.Length)
-                {
-                    var n = await request.Data.ReadAsync(chunkBytes, read, chunkBytes.Length - read, cancellationToken);
-                    if (n == 0) break;
-                    read += n;
-                }
-                if (read < chunkBytes.Length) Array.Resize(ref chunkBytes, read);
-            }
-            else
-            {
-                using var ms = new MemoryStream();
-                await request.Data.CopyToAsync(ms, 81920, cancellationToken);
-                chunkBytes = ms.ToArray();
-            }
+            var chunkBytes = await StreamReadHelper.ReadChunkAsync(request.Data, request.Length, cancellationToken)
+                .ConfigureAwait(false);
 
             // Checksum validation
             if (_resumableOptions.EnableChecksumValidation || request.ExpectedMd5 is not null)
@@ -328,33 +311,7 @@ public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadPr
         }
     }
 
-    public async Task<StorageResult<ResumableUploadStatus>> GetUploadStatusAsync(
-        string uploadId,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var session = await _sessionStore.GetAsync(uploadId, cancellationToken);
-            if (session is null)
-                return StorageResult<ResumableUploadStatus>.Failure($"Upload session '{uploadId}' not found or expired.", StorageErrorCode.FileNotFound);
-
-            return StorageResult<ResumableUploadStatus>.Success(new ResumableUploadStatus
-            {
-                UploadId = uploadId,
-                Path = session.Path,
-                TotalSize = session.TotalSize,
-                BytesUploaded = session.BytesUploaded,
-                IsComplete = session.IsComplete,
-                IsAborted = session.IsAborted,
-                ExpiresAt = session.ExpiresAt
-            });
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "[GCP] GetUploadStatus failed for session {UploadId}", uploadId);
-            return StorageResult<ResumableUploadStatus>.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
+    protected override IResumableSessionStore GetSessionStore() => _sessionStore;
 
     /// <summary>
     /// Completes the resumable upload by streaming the buffered temp file to GCS atomically.

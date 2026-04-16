@@ -13,4 +13,5 @@ public sealed class StoragePipelineContext
     public IDictionary<string, object> Items { get; } = new Dictionary<string, object>();
     public bool IsCancelled { get; set; }
     public string? CancellationReason { get; set; }
+    public CancellationToken CancellationToken { get; set; }
 }

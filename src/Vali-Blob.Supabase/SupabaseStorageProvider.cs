@@ -414,7 +414,7 @@ public sealed class SupabaseStorageProvider : BaseStorageProvider, IPresignedUrl
         }
     }
 
-    public async Task<StorageResult<ResumableUploadStatus>> GetUploadStatusAsync(
+    public override async Task<StorageResult<ResumableUploadStatus>> GetUploadStatusAsync(
         string uploadId,
         CancellationToken cancellationToken = default)
     {

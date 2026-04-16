@@ -28,6 +28,7 @@ public sealed class StoragePipelineBuilder
 
     public async Task ExecuteAsync(StoragePipelineContext context, CancellationToken cancellationToken = default)
     {
+        context.CancellationToken = cancellationToken;
         var pipeline = Build();
         await pipeline(context);
     }

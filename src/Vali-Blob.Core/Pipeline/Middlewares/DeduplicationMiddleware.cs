@@ -24,7 +24,7 @@ public sealed class DeduplicationMiddleware : IStorageMiddleware
         }
 
         // Compute hash and rewind stream
-        var hash = await ComputeSha256Async(context.Request.Content).ConfigureAwait(false);
+        var hash = await ComputeSha256Async(context.Request.Content, context.CancellationToken).ConfigureAwait(false);
         if (context.Request.Content.CanSeek)
             context.Request.Content.Seek(0, SeekOrigin.Begin);
 
@@ -40,7 +40,7 @@ public sealed class DeduplicationMiddleware : IStorageMiddleware
 
         if (_options.CheckBeforeUpload)
         {
-            var existingPath = await FindByHashAsync(hash, CancellationToken.None).ConfigureAwait(false);
+            var existingPath = await FindByHashAsync(hash, context.CancellationToken).ConfigureAwait(false);
             if (existingPath is not null)
             {
                 context.Items["deduplication.existingPath"] = existingPath;
@@ -54,7 +54,7 @@ public sealed class DeduplicationMiddleware : IStorageMiddleware
         await next(context);
     }
 
-    private static async Task<string> ComputeSha256Async(Stream stream)
+    private static async Task<string> ComputeSha256Async(Stream stream, CancellationToken cancellationToken = default)
     {
         using var sha256 = SHA256.Create();
         byte[] hashBytes;
@@ -62,22 +62,22 @@ public sealed class DeduplicationMiddleware : IStorageMiddleware
         if (stream.CanSeek)
         {
             var position = stream.Position;
-            hashBytes = await ComputeHashAsync(sha256, stream).ConfigureAwait(false);
+            hashBytes = await ComputeHashAsync(sha256, stream, cancellationToken).ConfigureAwait(false);
             stream.Seek(position, SeekOrigin.Begin);
         }
         else
         {
-            hashBytes = await ComputeHashAsync(sha256, stream).ConfigureAwait(false);
+            hashBytes = await ComputeHashAsync(sha256, stream, cancellationToken).ConfigureAwait(false);
         }
 
         return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
     }
 
-    private static async Task<byte[]> ComputeHashAsync(HashAlgorithm algorithm, Stream stream)
+    private static async Task<byte[]> ComputeHashAsync(HashAlgorithm algorithm, Stream stream, CancellationToken cancellationToken = default)
     {
         var buffer = new byte[81920];
         int read;
-        while ((read = await stream.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
+        while ((read = await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
         {
             algorithm.TransformBlock(buffer, 0, read, null, 0);
         }

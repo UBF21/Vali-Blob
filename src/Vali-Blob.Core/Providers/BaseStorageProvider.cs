@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO.Compression;
@@ -26,18 +27,21 @@ public abstract class BaseStorageProvider : IStorageProvider
     private readonly StoragePipelineBuilder _pipeline;
     private readonly Lazy<ResiliencePipeline> _lazyResiliencePipeline;
     private readonly EncryptionOptions _encryptionOptions;
+    private readonly Func<string, HttpClient>? _httpClientFactory;
     private StorageEventDispatcher? _eventDispatcher;
 
     protected BaseStorageProvider(
         ILogger logger,
         IOptions<ResilienceOptions> resilienceOptions,
         IOptions<EncryptionOptions> encryptionOptions,
-        StoragePipelineBuilder pipeline)
+        StoragePipelineBuilder pipeline,
+        Func<string, HttpClient>? httpClientFactory = null)
     {
         Logger = logger;
         _resilienceOptions = resilienceOptions.Value;
         _encryptionOptions = encryptionOptions.Value;
         _pipeline = pipeline;
+        _httpClientFactory = httpClientFactory;
         _lazyResiliencePipeline = new Lazy<ResiliencePipeline>(BuildResiliencePipeline);
     }
 
@@ -565,7 +569,7 @@ public abstract class BaseStorageProvider : IStorageProvider
     {
         try
         {
-            using var httpClient = new HttpClient();
+            using var httpClient = _httpClientFactory?.Invoke("vali-blob") ?? new HttpClient();
             using var response = await httpClient.GetAsync(sourceUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
 
@@ -595,6 +599,40 @@ public abstract class BaseStorageProvider : IStorageProvider
     /// <summary>Returns the bucket/container to use: bucketOverride if provided, else the configured bucket.</summary>
     protected static string ResolveBucket(string? bucketOverride, string configuredBucket)
         => bucketOverride ?? configuredBucket;
+
+    public virtual async Task<StorageResult<ResumableUploadStatus>> GetUploadStatusAsync(
+        string uploadId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var sessionStore = GetSessionStore();
+            if (sessionStore is null)
+                throw new NotImplementedException($"{ProviderName} does not support resumable upload status retrieval.");
+
+            var uploadSession = await sessionStore.GetAsync(uploadId, cancellationToken);
+            if (uploadSession is null)
+                return StorageResult<ResumableUploadStatus>.Failure($"Upload session '{uploadId}' not found or expired.", StorageErrorCode.FileNotFound);
+
+            return StorageResult<ResumableUploadStatus>.Success(new ResumableUploadStatus
+            {
+                UploadId = uploadId,
+                Path = uploadSession.Path,
+                TotalSize = uploadSession.TotalSize,
+                BytesUploaded = uploadSession.BytesUploaded,
+                IsComplete = uploadSession.IsComplete,
+                IsAborted = uploadSession.IsAborted,
+                ExpiresAt = uploadSession.ExpiresAt
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[{Provider}] GetUploadStatus failed for session {UploadId}", ProviderName, uploadId);
+            return StorageResult<ResumableUploadStatus>.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
+        }
+    }
+
+    protected virtual IResumableSessionStore? GetSessionStore() => null;
 
     // Abstract core methods — each provider implements these
     protected abstract Task<StorageResult<UploadResult>> UploadCoreAsync(UploadRequest request, IProgress<UploadProgress>? progress, CancellationToken cancellationToken);

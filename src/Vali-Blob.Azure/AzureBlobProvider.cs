@@ -264,25 +264,8 @@ public sealed class AzureBlobProvider : BaseStorageProvider, IPresignedUrlProvid
             var blockIdStr = request.Offset.ToString("D20");
             var blockId = Convert.ToBase64String(Encoding.UTF8.GetBytes(blockIdStr));
 
-            byte[] chunkBytes;
-            if (request.Length.HasValue)
-            {
-                chunkBytes = new byte[request.Length.Value];
-                var read = 0;
-                while (read < chunkBytes.Length)
-                {
-                    var n = await request.Data.ReadAsync(chunkBytes, read, chunkBytes.Length - read, cancellationToken);
-                    if (n == 0) break;
-                    read += n;
-                }
-                if (read < chunkBytes.Length) Array.Resize(ref chunkBytes, read);
-            }
-            else
-            {
-                using var ms = new MemoryStream();
-                await request.Data.CopyToAsync(ms, 81920, cancellationToken);
-                chunkBytes = ms.ToArray();
-            }
+            var chunkBytes = await StreamReadHelper.ReadChunkAsync(request.Data, request.Length, cancellationToken)
+                .ConfigureAwait(false);
 
             var chunkMd5 = ChunkChecksumHelper.ComputeMd5Base64(chunkBytes);
 
@@ -340,33 +323,7 @@ public sealed class AzureBlobProvider : BaseStorageProvider, IPresignedUrlProvid
         }
     }
 
-    public async Task<StorageResult<ResumableUploadStatus>> GetUploadStatusAsync(
-        string uploadId,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var session = await _sessionStore.GetAsync(uploadId, cancellationToken);
-            if (session is null)
-                return StorageResult<ResumableUploadStatus>.Failure($"Upload session '{uploadId}' not found or expired.", StorageErrorCode.FileNotFound);
-
-            return StorageResult<ResumableUploadStatus>.Success(new ResumableUploadStatus
-            {
-                UploadId = uploadId,
-                Path = session.Path,
-                TotalSize = session.TotalSize,
-                BytesUploaded = session.BytesUploaded,
-                IsComplete = session.IsComplete,
-                IsAborted = session.IsAborted,
-                ExpiresAt = session.ExpiresAt
-            });
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "[Azure] GetUploadStatus failed for session {UploadId}", uploadId);
-            return StorageResult<ResumableUploadStatus>.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
+    protected override IResumableSessionStore GetSessionStore() => _sessionStore;
 
     public async Task<StorageResult<UploadResult>> CompleteResumableUploadAsync(
         string uploadId,

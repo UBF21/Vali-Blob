@@ -23,7 +23,7 @@ public sealed class QuotaMiddleware : IStorageMiddleware
             return;
         }
 
-        var scope = _options.ScopeResolver?.Invoke(context.Request)
+        var scope = _options.ScopeResolver?.Resolve(context.Request)
                     ?? context.Request.BucketOverride
                     ?? "default";
 

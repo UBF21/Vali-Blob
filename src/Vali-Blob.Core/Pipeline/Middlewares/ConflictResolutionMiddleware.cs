@@ -37,7 +37,7 @@ public sealed class ConflictResolutionMiddleware : IStorageMiddleware
 
         if (context.Request.ConflictResolution == ConflictResolution.Rename)
         {
-            var newPath = await FindAvailablePathAsync(context.Request.Path, CancellationToken.None)
+            var newPath = await FindAvailablePathAsync(context.Request.Path, context.CancellationToken)
                 .ConfigureAwait(false);
             context.Request = context.Request.WithPath(newPath);
         }

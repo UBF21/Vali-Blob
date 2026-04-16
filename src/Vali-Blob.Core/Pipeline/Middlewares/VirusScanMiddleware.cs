@@ -14,7 +14,7 @@ public sealed class VirusScanMiddleware : IStorageMiddleware
         var result = await _scanner.ScanAsync(
             context.Request.Content,
             Path.GetFileName(context.Request.Path),
-            CancellationToken.None).ConfigureAwait(false);
+            context.CancellationToken).ConfigureAwait(false);
 
         if (!result.IsClean)
         {

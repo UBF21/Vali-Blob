@@ -13,6 +13,13 @@ public sealed class EncryptionMiddleware : IStorageMiddleware
     public EncryptionMiddleware(IOptions<EncryptionOptions> options)
     {
         _options = options.Value;
+        if (_options.Enabled)
+        {
+            if (_options.Key is null || _options.Key.Length == 0)
+                throw new InvalidOperationException("EncryptionOptions.Key must be set when encryption is enabled.");
+            if (_options.IV is null || _options.IV.Length == 0)
+                throw new InvalidOperationException("EncryptionOptions.IV must be set when encryption is enabled.");
+        }
     }
 
     public async Task InvokeAsync(StoragePipelineContext context, StorageMiddlewareDelegate next)

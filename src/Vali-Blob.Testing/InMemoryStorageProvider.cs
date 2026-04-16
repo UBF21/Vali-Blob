@@ -275,25 +275,8 @@ public sealed class InMemoryStorageProvider : BaseStorageProvider, IResumableUpl
             return StorageResult<ChunkUploadResult>.Failure("Session has been aborted.", StorageErrorCode.ValidationFailed);
         }
 
-        byte[] chunkBytes;
-        if (request.Length.HasValue)
-        {
-            chunkBytes = new byte[request.Length.Value];
-            var read = 0;
-            while (read < chunkBytes.Length)
-            {
-                var n = await request.Data.ReadAsync(chunkBytes, read, chunkBytes.Length - read, cancellationToken);
-                if (n == 0) break;
-                read += n;
-            }
-            if (read < chunkBytes.Length) Array.Resize(ref chunkBytes, read);
-        }
-        else
-        {
-            using var ms = new MemoryStream();
-            await request.Data.CopyToAsync(ms, 81920);
-            chunkBytes = ms.ToArray();
-        }
+        var chunkBytes = await StreamReadHelper.ReadChunkAsync(request.Data, request.Length, cancellationToken)
+            .ConfigureAwait(false);
 
         // Checksum validation
         if (request.ExpectedMd5 is not null)
@@ -325,7 +308,7 @@ public sealed class InMemoryStorageProvider : BaseStorageProvider, IResumableUpl
         });
     }
 
-    public Task<StorageResult<ResumableUploadStatus>> GetUploadStatusAsync(
+    public override Task<StorageResult<ResumableUploadStatus>> GetUploadStatusAsync(
         string uploadId,
         CancellationToken cancellationToken = default)
     {
@@ -383,11 +366,17 @@ public sealed class InMemoryStorageProvider : BaseStorageProvider, IResumableUpl
         CancellationToken cancellationToken = default)
     {
         using var activity = StorageTelemetry.StartActivity("resumable.abort", ProviderName, uploadId);
-        if (_resumableSessions.TryGetValue(uploadId, out var entry))
+        if (!_resumableSessions.TryGetValue(uploadId, out var entry))
         {
-            entry.Session.IsAborted = true;
-            _resumableSessions.TryRemove(uploadId, out _);
+            StorageTelemetry.RecordError(ProviderName, "resumable.abort");
+            activity?.SetStatus(ActivityStatusCode.Error, "Session not found");
+            return Task.FromResult(StorageResult.Failure(
+                $"Upload session '{uploadId}' not found or expired.",
+                StorageErrorCode.FileNotFound));
         }
+
+        entry.Session.IsAborted = true;
+        _resumableSessions.TryRemove(uploadId, out _);
         StorageTelemetry.RecordResumableAborted(ProviderName);
         activity?.SetStatus(ActivityStatusCode.Ok);
         return Task.FromResult(StorageResult.Success());
