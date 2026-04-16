@@ -16,6 +16,7 @@ namespace ValiBlob.Testing;
 public sealed class InMemoryStorageProvider : BaseStorageProvider, IResumableUploadProvider, IPresignedUrlProvider
 {
     private readonly ConcurrentDictionary<string, StoredFile> _store = new(StringComparer.Ordinal);
+    private readonly ResumableUploadOptions _resumableOptions;
 
     // Resumable upload state: uploadId → (session, chunk buffer)
     private readonly ConcurrentDictionary<string, (ResumableUploadSession Session, SortedChunkBuffer Buffer)>
@@ -27,8 +28,12 @@ public sealed class InMemoryStorageProvider : BaseStorageProvider, IResumableUpl
         ILogger<InMemoryStorageProvider> logger,
         IOptions<ResilienceOptions> resilienceOptions,
         IOptions<EncryptionOptions> encryptionOptions,
-        StoragePipelineBuilder pipeline)
-        : base(logger, resilienceOptions, encryptionOptions, pipeline) { }
+        StoragePipelineBuilder pipeline,
+        IOptions<ResumableUploadOptions> resumableOptions)
+        : base(logger, resilienceOptions, encryptionOptions, pipeline)
+    {
+        _resumableOptions = resumableOptions.Value;
+    }
 
     public bool HasFile(string path) => _store.ContainsKey(path);
     public int FileCount => _store.Count;
@@ -73,7 +78,16 @@ public sealed class InMemoryStorageProvider : BaseStorageProvider, IResumableUpl
             return Task.FromResult(StorageResult<Stream>.Failure(
                 $"File not found: {request.Path}", StorageErrorCode.FileNotFound));
 
-        Stream stream = new MemoryStream(file.Content);
+        byte[] content = file.Content;
+        if (request.Range is not null)
+        {
+            var from = request.Range.From;
+            var to = request.Range.To ?? (content.Length - 1);
+            var length = Math.Max(0, to - from + 1);
+            content = content.AsSpan((int)from, (int)length).ToArray();
+        }
+
+        Stream stream = new MemoryStream(content);
         return Task.FromResult(StorageResult<Stream>.Success(stream));
     }
 
@@ -247,7 +261,7 @@ public sealed class InMemoryStorageProvider : BaseStorageProvider, IResumableUpl
             BytesUploaded = 0,
             ContentType = request.ContentType,
             Metadata = request.Metadata,
-            ExpiresAt = DateTimeOffset.UtcNow.AddHours(24)
+            ExpiresAt = DateTimeOffset.UtcNow.Add(_resumableOptions.SessionExpiration)
         };
 
         _resumableSessions[uploadId] = (session, new SortedChunkBuffer());
