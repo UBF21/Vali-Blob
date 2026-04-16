@@ -65,6 +65,8 @@ builder.Services.AddValiRedisSessionStore(configure: opts =>
 
 Las sesiones se persisten en una tabla de base de datos relacional (`ValiBlob_ResumableSessions`) vía Entity Framework Core. Cualquier base de datos soportada por EF Core funciona: SQL Server, PostgreSQL, SQLite, MySQL y otras.
 
+> **Compatibilidad:** `ValiBlob.EFCore` apunta únicamente a **net8.0 y net9.0**. EF Core 9 eliminó el soporte para .NET 7 y versiones anteriores. Si tu proyecto apunta a .NET 6 o 7, usá `ValiBlob.Redis` en su lugar.
+
 ### Instalación
 
 ```bash
@@ -177,3 +179,4 @@ builder.Services.AddSingleton<IResumableSessionStore, MiStorePersonalizado>();
 | Soporte de TTL para sesiones | No | Sí (automático) | Sí (limpieza manual) |
 | Apto para producción | No | Sí | Sí |
 | Package | incluido | `ValiBlob.Redis` | `ValiBlob.EntityFramework` |
+| Compatibilidad .NET | todos los TFMs | netstandard2.0+ / net6–9 | **net8.0 y net9.0 únicamente** |

@@ -9,8 +9,8 @@
 
     <!-- NuGet identity -->
     <Authors>Felipe Rafael Montenegro Morriberon</Authors>
-    <Company>ValiBlob</Company>
-    <Product>ValiBlob</Product>
+    <Company>Vali-Blob</Company>
+    <Product>Vali-Blob</Product>
     <Copyright>Copyright © 2026 Felipe Rafael Montenegro Morriberon</Copyright>
     <PackageProjectUrl>https://github.com/UBF21/Vali-Blob</PackageProjectUrl>
     <RepositoryUrl>https://github.com/UBF21/Vali-Blob</RepositoryUrl>
@@ -37,6 +37,7 @@
     <!-- Symbol packages for debugging -->
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <DebugType>embedded</DebugType>
 
     <!-- Deterministic builds -->
     <Deterministic>true</Deterministic>

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ValiBlob.ImageSharp</AssemblyName>
+    <RootNamespace>ValiBlob.ImageSharp</RootNamespace>
+    <PackageId>Vali-Blob.ImageSharp</PackageId>
+    <Title>Vali-Blob.ImageSharp</Title>
+    <Description>
+        Image processing middleware for Vali-Blob using SixLabors.ImageSharp.
+        Provides an upload pipeline that automatically resizes, converts, and optimizes images
+        before storing them via any Vali-Blob provider (AWS S3, Azure Blob, GCP, OCI, Supabase, Local).
+        Supports thumbnail generation, format conversion (JPEG, PNG, WebP), quality control,
+        and maximum dimension constraints — all configurable via DI options.
+        Targets net6.0, net7.0, net8.0, and net9.0.
+    </Description>
+    <PackageTags>storage;image;resize;thumbnail;imagesharp;vali-blob;dotnet;di;webp;jpeg;png;processing</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/advanced/image-processing</PackageProjectUrl>
+    <!-- Suppress NuGet vulnerability audit warnings that are treated as errors globally -->
+    <NoWarn>$(NoWarn);NU1902;NU1903</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Vali-Blob.Core\Vali-Blob.Core.csproj" />
+    <PackageReference Include="SixLabors.ImageSharp" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);NU1902;NU1903</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Vali-Blob.Core\Vali-Blob.Core.csproj" />
+    <ProjectReference Include="..\..\src\Vali-Blob.Testing\Vali-Blob.Testing.csproj" />
+    <ProjectReference Include="..\..\src\Vali-Blob.GCP\Vali-Blob.GCP.csproj" />
+    <ProjectReference Include="..\..\src\Vali-Blob.OCI\Vali-Blob.OCI.csproj" />
+    <ProjectReference Include="..\..\src\Vali-Blob.Redis\Vali-Blob.Redis.csproj" />
+    <ProjectReference Include="..\..\src\Vali-Blob.EFCore\Vali-Blob.EFCore.csproj" />
+    <ProjectReference Include="..\..\src\Vali-Blob.Local\Vali-Blob.Local.csproj" />
+    <ProjectReference Include="..\..\src\Vali-Blob.AWS\Vali-Blob.AWS.csproj" />
+    <ProjectReference Include="..\..\src\Vali-Blob.Azure\Vali-Blob.Azure.csproj" />
+    <ProjectReference Include="..\..\src\Vali-Blob.Supabase\Vali-Blob.Supabase.csproj" />
+    <ProjectReference Include="..\..\src\Vali-Blob.HealthChecks\Vali-Blob.HealthChecks.csproj" />
+    <ProjectReference Include="..\..\src\Vali-Blob.ImageSharp\Vali-Blob.ImageSharp.csproj" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="SixLabors.ImageSharp" />
+  </ItemGroup>
+</Project>

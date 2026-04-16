@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ValiBlob.Azure</AssemblyName>
+    <RootNamespace>ValiBlob.Azure</RootNamespace>
+    <PackageId>Vali-Blob.Azure</PackageId>
+    <Title>Vali-Blob.Azure</Title>
+    <Description>
+        Azure Blob Storage provider for Vali-Blob — the unified cloud storage abstraction library for .NET.
+        Implements IBlobProvider over Azure Blob Storage with full support for upload, download, delete,
+        existence checks, SAS URL generation, resumable block-blob uploads,
+        Polly-powered retry resilience, and seamless DI registration via AddValiBlob().
+        Targets netstandard2.0, netstandard2.1, net6.0, net7.0, net8.0, and net9.0.
+    </Description>
+    <PackageTags>storage;cloud;azure;blob;abstraction;vali-blob;dotnet;di;sas;resumable</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/providers/azure</PackageProjectUrl>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Vali-Blob.Core\Vali-Blob.Core.csproj" />
+    <PackageReference Include="Azure.Storage.Blobs" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+  </ItemGroup>
+</Project>

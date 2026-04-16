@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ValiBlob.Testing</AssemblyName>
+    <RootNamespace>ValiBlob.Testing</RootNamespace>
+    <PackageId>Vali-Blob.Testing</PackageId>
+    <Title>Vali-Blob.Testing</Title>
+    <Description>
+        In-memory storage provider and testing utilities for Vali-Blob — the unified cloud storage abstraction library for .NET.
+        Provides InMemoryBlobProvider, a fully functional IBlobProvider implementation backed by a ConcurrentDictionary,
+        designed for unit and integration tests without any real cloud dependency.
+        Drop-in replacement for any Vali-Blob provider — swap with a single DI registration call in your test setup.
+        Targets netstandard2.0, netstandard2.1, net6.0, net7.0, net8.0, and net9.0.
+    </Description>
+    <PackageTags>storage;testing;inmemory;mock;vali-blob;dotnet;di;unit-test;integration-test</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/advanced/testing</PackageProjectUrl>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Vali-Blob.Core\Vali-Blob.Core.csproj" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+</Project>

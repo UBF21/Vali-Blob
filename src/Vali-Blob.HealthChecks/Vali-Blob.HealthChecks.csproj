@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ValiBlob.HealthChecks</AssemblyName>
+    <RootNamespace>ValiBlob.HealthChecks</RootNamespace>
+    <PackageId>Vali-Blob.HealthChecks</PackageId>
+    <Title>Vali-Blob.HealthChecks</Title>
+    <Description>
+        ASP.NET Core Health Checks integration for Vali-Blob — the unified cloud storage abstraction library for .NET.
+        Registers health check endpoints that probe the configured IBlobProvider (AWS S3, Azure Blob, GCP, OCI, Supabase, Local)
+        and report Healthy / Degraded / Unhealthy status via the standard Microsoft.Extensions.Diagnostics.HealthChecks infrastructure.
+        Works with all Vali-Blob providers and integrates with existing /health endpoints and dashboards.
+        Targets netstandard2.0, netstandard2.1, net6.0, net7.0, net8.0, and net9.0.
+    </Description>
+    <PackageTags>storage;cloud;healthchecks;vali-blob;dotnet;aspnetcore;di;monitoring;observability</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/advanced/health-checks</PackageProjectUrl>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Vali-Blob.Core\Vali-Blob.Core.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
+  </ItemGroup>
+</Project>

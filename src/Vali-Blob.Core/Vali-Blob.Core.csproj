@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ValiBlob.Core</AssemblyName>
+    <RootNamespace>ValiBlob.Core</RootNamespace>
+    <PackageId>Vali-Blob.Core</PackageId>
+    <Title>Vali-Blob.Core</Title>
+    <Description>
+        Core abstractions, contracts, and shared infrastructure for the Vali-Blob ecosystem.
+        Provides the IBlobProvider interface, IBlobContainerClient, resumable upload contracts
+        (IResumableUploadStore, IResumableUploadSession), Polly-based retry pipeline,
+        DI extension helpers, and provider-agnostic models.
+        This package is the foundation required by all Vali-Blob provider packages
+        (AWS, Azure, GCP, OCI, Supabase, Local) and utilities (Redis, EFCore, HealthChecks, ImageSharp).
+    </Description>
+    <PackageTags>storage;cloud;azure;aws;gcp;oci;blob;abstraction;vali-blob;dotnet;di;polly;resumable</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/</PackageProjectUrl>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Polly" />
+    <PackageReference Include="Polly.Extensions" />
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Condition="'$(TargetFramework)' == 'netstandard2.0' OR '$(TargetFramework)' == 'netstandard2.1'" />
+    <PackageReference Include="System.Diagnostics.DiagnosticSource" Condition="'$(TargetFramework)' == 'netstandard2.0' OR '$(TargetFramework)' == 'netstandard2.1'" />
+  </ItemGroup>
+
+  <!-- Polyfills: SDK includes all .cs automatically; #if guards in each file handle the targets -->
+
+</Project>

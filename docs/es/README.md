@@ -253,9 +253,12 @@ public class DocumentService
 
 | Framework | Versión mínima |
 |---|---|
+| .NET Standard | 2.0+ |
+| .NET | 6.0+ |
+| .NET | 7.0+ |
 | .NET | 8.0+ |
 | .NET | 9.0+ |
-| ASP.NET Core | 8.0+ |
+| ASP.NET Core | 6.0+ |
 
 ---
 

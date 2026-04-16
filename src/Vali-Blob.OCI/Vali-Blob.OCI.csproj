@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ValiBlob.OCI</AssemblyName>
+    <RootNamespace>ValiBlob.OCI</RootNamespace>
+    <PackageId>Vali-Blob.OCI</PackageId>
+    <Title>Vali-Blob.OCI</Title>
+    <Description>
+        Oracle Cloud Infrastructure (OCI) Object Storage provider for Vali-Blob — the unified cloud storage abstraction library for .NET.
+        Implements IBlobProvider over OCI Object Storage with full support for upload, download, delete,
+        existence checks, Pre-Authenticated Request (PAR) URL generation, resumable uploads,
+        Polly-powered retry resilience, and seamless DI registration via AddValiBlob().
+        Targets netstandard2.0, netstandard2.1, net6.0, net7.0, net8.0, and net9.0.
+    </Description>
+    <PackageTags>storage;cloud;oci;oracle;object-storage;blob;abstraction;vali-blob;dotnet;di;par;resumable</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/providers/oci</PackageProjectUrl>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Vali-Blob.Core\Vali-Blob.Core.csproj" />
+    <PackageReference Include="OCI.DotNetSDK.Objectstorage" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+  </ItemGroup>
+</Project>

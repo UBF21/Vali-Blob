@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ValiBlob.EFCore</AssemblyName>
+    <RootNamespace>ValiBlob.EFCore</RootNamespace>
+    <PackageId>Vali-Blob.EFCore</PackageId>
+    <Title>Vali-Blob.EFCore</Title>
+    <Description>
+        Entity Framework Core session store for Vali-Blob resumable uploads.
+        Implements IResumableUploadStore backed by any EF Core-compatible database (SQL Server, PostgreSQL, SQLite, etc.),
+        enabling persistent tracking of multipart / chunked upload sessions across Vali-Blob providers.
+        Includes a ready-to-use DbContext, migration support, and DI registration helpers.
+        Targets net8.0 and net9.0 (EF Core 9 requires .NET 8+).
+    </Description>
+    <PackageTags>storage;cloud;efcore;entityframework;resumable;vali-blob;dotnet;di;sqlserver;postgresql;sqlite</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/resumable/efcore-store</PackageProjectUrl>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Vali-Blob.Core\Vali-Blob.Core.csproj" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+</Project>

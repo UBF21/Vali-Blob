@@ -230,6 +230,7 @@ if (!result.IsSuccess)
 | `netstandard2.0` | Yes |
 | `netstandard2.1` | Yes |
 | `net6.0` | Yes |
+| `net7.0` | Yes |
 | `net8.0` | Yes |
 | `net9.0` | Yes |
 

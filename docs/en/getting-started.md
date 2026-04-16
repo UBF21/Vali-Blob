@@ -6,7 +6,7 @@ This guide walks you through installing ValiBlob, wiring it into an ASP.NET Core
 
 ## Prerequisites
 
-- .NET 6, 8, or 9 (or .NET Standard 2.0 / 2.1 for library projects)
+- .NET 6, 7, 8, or 9 (or .NET Standard 2.0 / 2.1 for library projects)
 - An ASP.NET Core or console application with a `ServiceCollection`
 - A cloud storage account (AWS, Azure, GCP, OCI, or Supabase) — or use `ValiBlob.Testing` for fully in-memory operation
 
@@ -55,7 +55,7 @@ dotnet add package ValiBlob.Testing
 
 ## Basic setup
 
-### `Program.cs` (minimal API / .NET 6+)
+### `Program.cs` (minimal API / .NET 6/7+)
 
 ```csharp
 using ValiBlob.Core.DependencyInjection;

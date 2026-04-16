@@ -6,7 +6,7 @@ Esta guía te lleva desde cero hasta tener tu primera operación de almacenamien
 
 ## Prerrequisitos
 
-- .NET 8.0 SDK o superior
+- .NET 7.0 SDK o superior (también compatible con .NET 6, 8 y 9)
 - Una cuenta en al menos uno de los proveedores soportados (o Docker para MinIO local)
 - Conocimientos básicos de inyección de dependencias en ASP.NET Core
 
@@ -53,7 +53,7 @@ dotnet add package ValiBlob.Testing
 
 ## Configuración básica
 
-### Program.cs (API mínima / .NET 8+)
+### Program.cs (API mínima / .NET 6/7+)
 
 ```csharp
 using ValiBlob.Core.DependencyInjection;

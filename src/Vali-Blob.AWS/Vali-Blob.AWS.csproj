@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net6.0;net7.0;net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ValiBlob.AWS</AssemblyName>
+    <RootNamespace>ValiBlob.AWS</RootNamespace>
+    <PackageId>Vali-Blob.AWS</PackageId>
+    <Title>Vali-Blob.AWS</Title>
+    <Description>
+        Amazon S3 provider for Vali-Blob — the unified cloud storage abstraction library for .NET.
+        Implements IBlobProvider over AWS S3 with full support for upload, download, delete,
+        existence checks, presigned URL generation, resumable multipart uploads,
+        Polly-powered retry resilience, and seamless DI registration via AddValiBlob().
+        Targets netstandard2.0, netstandard2.1, net6.0, net7.0, net8.0, and net9.0.
+    </Description>
+    <PackageTags>storage;cloud;aws;s3;blob;abstraction;vali-blob;dotnet;di;multipart;presigned</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://vali-blob-docs.netlify.app/docs/providers/aws</PackageProjectUrl>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Vali-Blob.Core\Vali-Blob.Core.csproj" />
+    <PackageReference Include="AWSSDK.S3" />
+    <PackageReference Include="AWSSDK.Extensions.NETCore.Setup" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
+  </ItemGroup>
+</Project>

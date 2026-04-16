@@ -53,4 +53,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Developer experience
 - Fluent DI registration via `AddValiBlob()` with per-provider extension methods (`UseAWS`, `UseAzure`, `UseGCP`, `UseOCI`, `UseSupabase`)
 - Full documentation in English (`docs/en/`) and Spanish (`docs/es/`)
-- Multi-target framework support: `netstandard2.0`, `netstandard2.1`, `net6.0`, `net8.0`, `net9.0`
+- Multi-target framework support: `netstandard2.0`, `netstandard2.1`, `net6.0`, `net7.0`, `net8.0`, `net9.0`
