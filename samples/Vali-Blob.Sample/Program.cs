@@ -10,10 +10,8 @@ var builder = WebApplication.CreateBuilder(args);
 // ─── ValiBlob setup ───────────────────────────────────────────────────────────
 // All providers are registered as keyed services (key = provider name).
 // IStorageFactory resolves the default provider by that name at runtime.
-builder.Services.AddValiBlob(options =>
-    {
-        options.DefaultProvider = "Local";
-    })
+builder.Services.AddValiBlob()
+    .WithDefaultProvider("Local")
     .UseLocal(o =>
     {
         o.BasePath = Path.Combine(Path.GetTempPath(), "valiblob-sample");

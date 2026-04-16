@@ -33,9 +33,26 @@ public sealed class ValiStorageBuilder
         return this;
     }
 
-    public ValiStorageBuilder WithDefaultProvider(string providerName)
+    public ValiStorageBuilder WithDefaultProvider(string providerNameOrKey)
     {
-        Services.Configure<StorageGlobalOptions>(o => o.DefaultProvider = providerName);
+        Services.Configure<StorageGlobalOptions>(o => o.DefaultProvider = providerNameOrKey);
+        return this;
+    }
+
+    public ValiStorageBuilder WithDefaultProvider(StorageProviderType providerType)
+    {
+        if (providerType == StorageProviderType.None)
+        {
+            Services.Configure<StorageGlobalOptions>(o => o.DefaultProvider = string.Empty);
+        }
+        else if (providerType == StorageProviderType.Custom)
+        {
+            throw new ArgumentException("For custom providers, use WithDefaultProvider(string customKey).");
+        }
+        else
+        {
+            Services.Configure<StorageGlobalOptions>(o => o.DefaultProvider = providerType.ToString());
+        }
         return this;
     }
 
