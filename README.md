@@ -77,7 +77,7 @@ public class FileService(IStorageProvider storage)
         if (result.IsSuccess)
             Console.WriteLine($"Stored at: {result.Value}");
         else
-            Console.WriteLine($"Error: {result.Error.Message}");
+            Console.WriteLine($"Error: {result.ErrorMessage}");
     }
 
     public async Task<Stream?> DownloadAsync(string fileName)
