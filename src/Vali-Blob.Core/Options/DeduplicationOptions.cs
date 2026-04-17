@@ -1,6 +1,6 @@
 namespace ValiBlob.Core.Options;
 
-public class DeduplicationOptions
+public sealed class DeduplicationOptions
 {
     /// <summary>Whether deduplication is enabled. Opt-in: disabled by default.</summary>
     public bool Enabled { get; set; } = false;

@@ -1,6 +1,6 @@
 namespace ValiBlob.Core.Options;
 
-public class CdnOptions
+public sealed class CdnOptions
 {
     /// <summary>Base CDN URL, e.g. "https://cdn.example.com"</summary>
     public string BaseUrl { get; set; } = string.Empty;

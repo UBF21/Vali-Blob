@@ -1,6 +1,6 @@
 namespace ValiBlob.Core.Options;
 
-public class ContentTypeDetectionOptions
+public sealed class ContentTypeDetectionOptions
 {
     public bool Enabled { get; set; } = true;
 
