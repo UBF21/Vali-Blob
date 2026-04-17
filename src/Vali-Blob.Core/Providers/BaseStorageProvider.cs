@@ -26,6 +26,7 @@ public abstract class BaseStorageProvider : IStorageProvider
     private readonly Lazy<ResiliencePipeline> _lazyResiliencePipeline;
     private readonly EncryptionOptions _encryptionOptions;
     private readonly Func<string, HttpClient>? _httpClientFactory;
+    private readonly DownloadTransformPipeline _downloadTransforms;
     private StorageEventDispatcher? _eventDispatcher;
 
     protected BaseStorageProvider(
@@ -40,6 +41,7 @@ public abstract class BaseStorageProvider : IStorageProvider
         _encryptionOptions = encryptionOptions.Value;
         _pipeline = pipeline;
         _httpClientFactory = httpClientFactory;
+        _downloadTransforms = new DownloadTransformPipeline(_encryptionOptions, this);
         _lazyResiliencePipeline = new Lazy<ResiliencePipeline>(() =>
             ResiliencePipelineFactory.BuildPipeline(_resilienceOptions, Logger, ProviderName));
     }
@@ -160,7 +162,7 @@ public abstract class BaseStorageProvider : IStorageProvider
 
             if (result.IsSuccess && result.Value is not null)
             {
-                var processedStream = await ApplyDownloadTransformsAsync(result.Value, request, cancellationToken);
+                var processedStream = await _downloadTransforms.ApplyAsync(result.Value, request, cancellationToken);
                 result = StorageResult<Stream>.Success(processedStream);
             }
 
@@ -198,81 +200,6 @@ public abstract class BaseStorageProvider : IStorageProvider
         }
     }
 
-    private async Task<Stream> ApplyDownloadTransformsAsync(
-        Stream rawStream,
-        DownloadRequest request,
-        CancellationToken cancellationToken)
-    {
-        // Fetch metadata once to check for encryption and compression markers
-        Stream current = rawStream;
-        IDictionary<string, string>? customMetadata = null;
-
-        if (request.AutoDecrypt || request.AutoDecompress)
-        {
-            var metaResult = await GetMetadataAsync(request.Path, cancellationToken);
-            if (metaResult.IsSuccess && metaResult.Value is not null)
-                customMetadata = metaResult.Value.CustomMetadata;
-        }
-
-        if (customMetadata is null)
-            return current;
-
-        // 1. Decrypt first (if the file was encrypted)
-        if (request.AutoDecrypt &&
-            customMetadata.TryGetValue("x-vali-iv", out var ivBase64) &&
-            !string.IsNullOrEmpty(ivBase64) &&
-            _encryptionOptions.Enabled &&
-            _encryptionOptions.Key is { Length: > 0 })
-        {
-            var iv = Convert.FromBase64String(ivBase64);
-            current = await DecryptStreamAsync(current, _encryptionOptions.Key, iv);
-        }
-
-        // 2. Decompress second (if the file was compressed)
-        if (request.AutoDecompress &&
-            customMetadata.TryGetValue("x-vali-compressed", out var compressionAlgo) &&
-            string.Equals(compressionAlgo, "gzip", StringComparison.OrdinalIgnoreCase))
-        {
-            current = await DecompressGzipStreamAsync(current);
-        }
-
-        return current;
-    }
-
-    private static async Task<Stream> DecryptStreamAsync(Stream encryptedStream, byte[] key, byte[] iv)
-    {
-        using var aes = Aes.Create();
-        aes.Key = key;
-        aes.IV = iv;
-        aes.Mode = CipherMode.CBC;
-        aes.Padding = PaddingMode.PKCS7;
-
-        // Read entire encrypted content into memory first
-        byte[] encryptedBytes;
-        using (var buffer = new MemoryStream())
-        {
-            await encryptedStream.CopyToAsync(buffer);
-            encryptedBytes = buffer.ToArray();
-        }
-
-        using var encryptedMs = new MemoryStream(encryptedBytes);
-        using var cryptoStream = new CryptoStream(encryptedMs, aes.CreateDecryptor(), CryptoStreamMode.Read);
-        var output = new MemoryStream();
-        await cryptoStream.CopyToAsync(output);
-        output.Position = 0;
-        return output;
-    }
-
-    private static async Task<Stream> DecompressGzipStreamAsync(Stream compressedStream)
-    {
-        var output = new MemoryStream();
-        using (var gzip = new GZipStream(compressedStream, CompressionMode.Decompress, leaveOpen: true))
-        {
-            await gzip.CopyToAsync(output);
-        }
-        output.Position = 0;
-        return output;
-    }
 
     public async Task<StorageResult> DeleteAsync(string path, CancellationToken cancellationToken = default)
     {
