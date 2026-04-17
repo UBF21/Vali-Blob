@@ -121,7 +121,7 @@ public sealed class DeduplicationMiddlewareTests
         ctx2.IsCancelled.Should().BeFalse();
     }
 
-    // 5. context.Items["deduplication.contentHash"] is set after middleware runs
+    // 5. context.Items[PipelineContextKeys.DeduplicationHash] is set after middleware runs
     [Fact]
     public async Task ContentHashItem_IsSetAfterMiddlewareRuns()
     {
@@ -132,12 +132,12 @@ public sealed class DeduplicationMiddlewareTests
 
         await mw.InvokeAsync(ctx, NoOpNext);
 
-        ctx.Items.Should().ContainKey("deduplication.contentHash");
-        ctx.Items["deduplication.contentHash"].Should().BeOfType<string>();
-        ((string)ctx.Items["deduplication.contentHash"]).Should().NotBeNullOrEmpty();
+        ctx.Items.Should().ContainKey(PipelineContextKeys.DeduplicationHash);
+        ctx.Items[PipelineContextKeys.DeduplicationHash].Should().BeOfType<string>();
+        ((string)ctx.Items[PipelineContextKeys.DeduplicationHash]).Should().NotBeNullOrEmpty();
     }
 
-    // 6. context.Items["deduplication.isDuplicate"] is true when duplicate detected
+    // 6. context.Items[PipelineContextKeys.DeduplicationIsDuplicate] is true when duplicate detected
     [Fact]
     public async Task IsDuplicateItem_IsTrueWhenDuplicateDetected()
     {
@@ -155,8 +155,8 @@ public sealed class DeduplicationMiddlewareTests
         var ctx2 = MakeContext(content, "uploads/duplicate.bin");
         await mw.InvokeAsync(ctx2, NoOpNext);
 
-        ctx2.Items.Should().ContainKey("deduplication.isDuplicate");
-        ctx2.Items["deduplication.isDuplicate"].Should().Be(true);
+        ctx2.Items.Should().ContainKey(PipelineContextKeys.DeduplicationIsDuplicate);
+        ctx2.Items[PipelineContextKeys.DeduplicationIsDuplicate].Should().Be(true);
     }
 
     // 7. When CheckBeforeUpload = false → hash stamped in metadata but no duplicate check

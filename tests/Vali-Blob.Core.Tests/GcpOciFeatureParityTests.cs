@@ -80,12 +80,16 @@ public sealed class GcpOciFeatureParityTests
     }
 
     [Fact]
-    public void OciOptions_DefaultRegion_IsSet()
+    public void OciOptions_Region_IsConfigurable()
     {
         var options = new OCIStorageOptions();
 
-        // Default region is defined in the class
-        options.Region.Should().NotBeNullOrEmpty();
+        // Region has no hardcoded default — users must configure it explicitly
+        options.Region.Should().Be(string.Empty);
+
+        // Users set the region during configuration
+        options.Region = "ap-southeast-1";
+        options.Region.Should().Be("ap-southeast-1");
     }
 
     [Fact]
