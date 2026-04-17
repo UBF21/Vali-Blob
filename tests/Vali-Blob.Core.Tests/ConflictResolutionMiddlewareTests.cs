@@ -5,6 +5,7 @@ using ValiBlob.Core.Abstractions;
 using ValiBlob.Core.DependencyInjection;
 using ValiBlob.Core.Exceptions;
 using ValiBlob.Core.Models;
+using ValiBlob.Core.Options;
 using ValiBlob.Core.Pipeline;
 using ValiBlob.Core.Pipeline.Middlewares;
 using ValiBlob.Testing;
@@ -58,7 +59,7 @@ public sealed class ConflictResolutionMiddlewareTests
         var provider = BuildProvider();
         await SeedFileAsync(provider, "uploads/existing.txt");
 
-        var mw = new ConflictResolutionMiddleware(provider);
+        var mw = new ConflictResolutionMiddleware(provider, new ConflictResolutionOptions());
         var ctx = MakeContext("uploads/existing.txt", ConflictResolution.Overwrite);
 
         var nextCalled = false;
@@ -75,7 +76,7 @@ public sealed class ConflictResolutionMiddlewareTests
         var provider = BuildProvider();
         await SeedFileAsync(provider, "uploads/exists.txt");
 
-        var mw = new ConflictResolutionMiddleware(provider);
+        var mw = new ConflictResolutionMiddleware(provider, new ConflictResolutionOptions());
         var ctx = MakeContext("uploads/exists.txt", ConflictResolution.Fail);
 
         var act = async () => await mw.InvokeAsync(ctx, NoOpNext);
@@ -90,7 +91,7 @@ public sealed class ConflictResolutionMiddlewareTests
         var provider = BuildProvider();
         // No seed — file does not exist
 
-        var mw = new ConflictResolutionMiddleware(provider);
+        var mw = new ConflictResolutionMiddleware(provider, new ConflictResolutionOptions());
         var ctx = MakeContext("uploads/new-file.txt", ConflictResolution.Fail);
 
         var nextCalled = false;
@@ -107,7 +108,7 @@ public sealed class ConflictResolutionMiddlewareTests
         var provider = BuildProvider();
         await SeedFileAsync(provider, "uploads/photo.txt");
 
-        var mw = new ConflictResolutionMiddleware(provider);
+        var mw = new ConflictResolutionMiddleware(provider, new ConflictResolutionOptions());
         var ctx = MakeContext("uploads/photo.txt", ConflictResolution.Rename);
 
         await mw.InvokeAsync(ctx, NoOpNext);
@@ -123,7 +124,7 @@ public sealed class ConflictResolutionMiddlewareTests
         await SeedFileAsync(provider, "uploads/doc.txt");
         await SeedFileAsync(provider, "uploads/doc_1.txt");
 
-        var mw = new ConflictResolutionMiddleware(provider);
+        var mw = new ConflictResolutionMiddleware(provider, new ConflictResolutionOptions());
         var ctx = MakeContext("uploads/doc.txt", ConflictResolution.Rename);
 
         await mw.InvokeAsync(ctx, NoOpNext);
@@ -138,7 +139,7 @@ public sealed class ConflictResolutionMiddlewareTests
         var provider = BuildProvider();
         await SeedFileAsync(provider, "uploads/archive.tar.gz");
 
-        var mw = new ConflictResolutionMiddleware(provider);
+        var mw = new ConflictResolutionMiddleware(provider, new ConflictResolutionOptions());
         var ctx = MakeContext("uploads/archive.tar.gz", ConflictResolution.Rename);
 
         await mw.InvokeAsync(ctx, NoOpNext);
@@ -155,7 +156,7 @@ public sealed class ConflictResolutionMiddlewareTests
         var provider = BuildProvider();
         // No seed
 
-        var mw = new ConflictResolutionMiddleware(provider);
+        var mw = new ConflictResolutionMiddleware(provider, new ConflictResolutionOptions());
         var ctx = MakeContext("uploads/brand-new.txt", ConflictResolution.Rename);
 
         await mw.InvokeAsync(ctx, NoOpNext);
@@ -170,7 +171,7 @@ public sealed class ConflictResolutionMiddlewareTests
         var provider = BuildProvider();
         await SeedFileAsync(provider, "uploads/report.pdf");
 
-        var mw = new ConflictResolutionMiddleware(provider);
+        var mw = new ConflictResolutionMiddleware(provider, new ConflictResolutionOptions());
         var ctx = MakeContext("uploads/report.pdf", ConflictResolution.Rename);
 
         StoragePath? pathAtNext = null;

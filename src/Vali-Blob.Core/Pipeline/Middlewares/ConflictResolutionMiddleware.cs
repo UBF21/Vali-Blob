@@ -1,14 +1,20 @@
 using ValiBlob.Core.Abstractions;
 using ValiBlob.Core.Exceptions;
 using ValiBlob.Core.Models;
+using ValiBlob.Core.Options;
 
 namespace ValiBlob.Core.Pipeline.Middlewares;
 
 public sealed class ConflictResolutionMiddleware : IStorageMiddleware
 {
     private readonly IStorageProvider _provider;
+    private readonly ConflictResolutionOptions _options;
 
-    public ConflictResolutionMiddleware(IStorageProvider provider) => _provider = provider;
+    public ConflictResolutionMiddleware(IStorageProvider provider, ConflictResolutionOptions options)
+    {
+        _provider = provider;
+        _options = options;
+    }
 
     public async Task InvokeAsync(StoragePipelineContext context, StorageMiddlewareDelegate next)
     {
@@ -52,7 +58,7 @@ public sealed class ConflictResolutionMiddleware : IStorageMiddleware
         var name = Path.GetFileNameWithoutExtension(originalStr);
         var ext = Path.GetExtension(originalStr);
 
-        for (var i = 1; i <= 1000; i++)
+        for (var i = 1; i <= _options.MaxRenameAttempts; i++)
         {
             var candidate = string.IsNullOrEmpty(dir)
                 ? $"{name}_{i}{ext}"

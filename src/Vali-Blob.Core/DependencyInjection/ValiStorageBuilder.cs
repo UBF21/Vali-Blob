@@ -158,8 +158,13 @@ public sealed class ValiStorageBuilder
     /// Adds conflict resolution middleware that checks whether a file already exists
     /// and acts according to <see cref="Models.ConflictResolution"/> set on each upload request.
     /// </summary>
-    public ValiStorageBuilder WithConflictResolution()
+    public ValiStorageBuilder WithConflictResolution(Action<ConflictResolutionOptions>? configure = null)
     {
+        Services.Configure<ConflictResolutionOptions>(o =>
+        {
+            if (configure is not null)
+                configure(o);
+        });
         Services.TryAddEnumerable(ServiceDescriptor.Transient<IStorageMiddleware, ConflictResolutionMiddleware>());
         return this;
     }
