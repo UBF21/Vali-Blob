@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using ValiBlob.Core.Abstractions;
 using ValiBlob.Core.Options;
+using ValiBlob.Core.Pipeline;
 
 namespace ValiBlob.Core.Pipeline.Middlewares;
 
@@ -28,7 +29,7 @@ public sealed class DeduplicationMiddleware : IStorageMiddleware
         if (context.Request.Content.CanSeek)
             context.Request.Content.Seek(0, SeekOrigin.Begin);
 
-        context.Items["deduplication.contentHash"] = hash;
+        context.Items[PipelineContextKeys.DeduplicationHash] = hash;
 
         // Stamp the hash in metadata for future lookups
         var metadata = new Dictionary<string, string>(
@@ -43,8 +44,8 @@ public sealed class DeduplicationMiddleware : IStorageMiddleware
             var existingPath = await FindByHashAsync(hash, context.CancellationToken).ConfigureAwait(false);
             if (existingPath is not null)
             {
-                context.Items["deduplication.existingPath"] = existingPath;
-                context.Items["deduplication.isDuplicate"] = true;
+                context.Items[PipelineContextKeys.DeduplicationHash] = hash;
+                context.Items[PipelineContextKeys.DeduplicationIsDuplicate] = true;
                 context.IsCancelled = true;
                 context.CancellationReason = $"Duplicate file detected. Existing path: {existingPath}";
                 return;
