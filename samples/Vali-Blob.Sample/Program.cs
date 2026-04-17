@@ -1,7 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using ValiBlob.Core.Abstractions;
 using ValiBlob.Core.DependencyInjection;
+using ValiBlob.Core.Events;
 using ValiBlob.Core.Models;
+using ValiBlob.Core.Options;
+using ValiBlob.Core.Pipeline.Middlewares;
 using ValiBlob.HealthChecks.Extensions;
 using ValiBlob.Local.DependencyInjection;
 
@@ -10,8 +14,12 @@ var builder = WebApplication.CreateBuilder(args);
 // ─── ValiBlob setup ───────────────────────────────────────────────────────────
 // All providers are registered as keyed services (key = provider name).
 // IStorageFactory resolves the default provider by that name at runtime.
+//
+// BEST PRACTICE: Use StorageProviderType enum for type-safe provider selection
+// instead of string literals to avoid typos and get compile-time verification.
 builder.Services.AddValiBlob()
-    .WithDefaultProvider("Local")
+    // Type-safe provider selection via enum ✅
+    .WithDefaultProvider(StorageProviderType.Local)
     .UseLocal(o =>
     {
         o.BasePath = Path.Combine(Path.GetTempPath(), "valiblob-sample");
@@ -30,16 +38,39 @@ builder.Services.AddValiBlob()
             o.Enabled = true;
             o.MinSizeBytes = 1024;
         })
+        // IMPROVEMENT: Content-type detection via magic bytes
+        .Use<ContentTypeDetectionMiddleware>()
+        // IMPROVEMENT: File deduplication via SHA-256 hashing
+        .Use<DeduplicationMiddleware>()
     )
     .WithResumableUploads(o =>
     {
         o.DefaultChunkSizeBytes = 5 * 1024 * 1024; // 5 MB
         o.EnableChecksumValidation = true;
+    })
+    // IMPROVEMENT: Add resilience policies (retry, circuit breaker)
+    .WithResiliencePolicies(o =>
+    {
+        o.RetryCount = 3;
+        o.RetryDelay = TimeSpan.FromMilliseconds(100);
+        o.CircuitBreakerThreshold = 50;
     });
 
 // ─── Health checks ────────────────────────────────────────────────────────────
 builder.Services.AddHealthChecks()
     .AddValiBlob();
+
+// ─── IMPROVEMENT: Event handlers for storage operations ────────────────────────
+// Listen to upload/download/delete events for auditing, logging, notifications
+builder.Services.AddValiBlob()
+    .WithEventHandler<SampleStorageEventHandler>();
+
+// ─── IMPROVEMENT: Decorators for observability ────────────────────────────────
+// StorageTelemetryDecorator: Adds OpenTelemetry instrumentation
+// StorageEventDecorator: Enables event dispatching
+// These can be optionally applied to providers:
+//   var provider = new StorageTelemetryDecorator(baseProvider);
+//   var provider = new StorageEventDecorator(provider, eventDispatcher);
 
 // .NET 9 built-in OpenAPI (no Swashbuckle package required)
 builder.Services.AddOpenApi();
@@ -250,3 +281,62 @@ app.Run();
 
 // ─── Request models ───────────────────────────────────────────────────────────
 record StartUploadRequest(string Path, string ContentType, long TotalSize);
+
+// ─── Sample event handler for storage operations ─────────────────────────────
+/// <summary>
+/// Example event handler demonstrating how to listen to storage events
+/// for auditing, metrics collection, or external notifications.
+/// </summary>
+internal class SampleStorageEventHandler : IStorageEventHandler
+{
+    private readonly ILogger<SampleStorageEventHandler> _logger;
+
+    public SampleStorageEventHandler(ILogger<SampleStorageEventHandler> logger)
+    {
+        _logger = logger;
+    }
+
+    /// <summary>Fired when upload completes successfully.</summary>
+    public Task OnUploadCompletedAsync(StorageEventContext context, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation(
+            "[Upload] {Provider} | Path: {Path} | Size: {Size} bytes | Duration: {Duration}ms",
+            context.ProviderName,
+            context.Path,
+            context.FileSizeBytes ?? 0,
+            context.Duration.TotalMilliseconds);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Fired when upload fails.</summary>
+    public Task OnUploadFailedAsync(StorageEventContext context, CancellationToken cancellationToken = default)
+    {
+        _logger.LogWarning(
+            "[Upload Failed] {Provider} | Path: {Path} | Error: {Error}",
+            context.ProviderName,
+            context.Path,
+            context.ErrorMessage);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Fired when download completes successfully.</summary>
+    public Task OnDownloadCompletedAsync(StorageEventContext context, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation(
+            "[Download] {Provider} | Path: {Path} | Duration: {Duration}ms",
+            context.ProviderName,
+            context.Path,
+            context.Duration.TotalMilliseconds);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Fired when delete completes successfully.</summary>
+    public Task OnDeleteCompletedAsync(StorageEventContext context, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation(
+            "[Delete] {Provider} | Path: {Path}",
+            context.ProviderName,
+            context.Path);
+        return Task.CompletedTask;
+    }
+}

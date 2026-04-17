@@ -168,4 +168,29 @@ public sealed class ValiStorageBuilder
         Services.TryAddEnumerable(ServiceDescriptor.Transient<IStorageMiddleware, ConflictResolutionMiddleware>());
         return this;
     }
+
+    /// <summary>
+    /// Enables automatic OpenTelemetry instrumentation (timing, activity spans, metrics)
+    /// by wrapping all resolved providers with StorageTelemetryDecorator.
+    /// Enables EnableTelemetry flag automatically.
+    /// </summary>
+    public ValiStorageBuilder WithTelemetry()
+    {
+        Services.Configure<StorageGlobalOptions>(o =>
+        {
+            o.EnableTelemetry = true;
+            o.ApplyTelemetryDecorator = true;
+        });
+        return this;
+    }
+
+    /// <summary>
+    /// Enables automatic event dispatching by wrapping all resolved providers with StorageEventDecorator.
+    /// Requires at least one IStorageEventHandler to be registered via WithEventHandler{T}().
+    /// </summary>
+    public ValiStorageBuilder WithEventDispatching()
+    {
+        Services.Configure<StorageGlobalOptions>(o => o.ApplyEventDecorator = true);
+        return this;
+    }
 }

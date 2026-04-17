@@ -26,19 +26,20 @@ public sealed class StorageFactory : IStorageFactory
 
         var provider = _serviceProvider.GetKeyedService<IStorageProvider>(key);
 
-        return provider ?? throw new InvalidOperationException(
-            $"No storage provider registered with name '{key}'. " +
-            $"Make sure to call .Use{key}() during setup.");
+        if (provider is null)
+            throw new InvalidOperationException(
+                $"No storage provider registered with name '{key}'. " +
+                $"Make sure to call .Use{key}() during setup.");
+
+        return ApplyDecorators(provider);
     }
 
     public IStorageProvider Create<TProvider>() where TProvider : IStorageProvider
     {
         var typeName = typeof(TProvider).Name;
         var keyedProvider = _serviceProvider.GetKeyedService<IStorageProvider>(typeName);
-        if (keyedProvider is not null)
-            return keyedProvider;
-
-        return _serviceProvider.GetRequiredService<TProvider>();
+        var provider = keyedProvider ?? _serviceProvider.GetRequiredService<TProvider>();
+        return ApplyDecorators(provider);
     }
 
     public IEnumerable<IStorageProvider> GetAll()
@@ -51,12 +52,29 @@ public sealed class StorageFactory : IStorageFactory
             {
                 var provider = _serviceProvider.GetKeyedService<IStorageProvider>(providerKey);
                 if (provider is not null)
-                    providers.Add(provider);
+                    providers.Add(ApplyDecorators(provider));
             }
 
             return providers;
         }
 
         return _serviceProvider.GetServices<IStorageProvider>();
+    }
+
+    private IStorageProvider ApplyDecorators(IStorageProvider provider)
+    {
+        var result = provider;
+
+        if (_options.ApplyTelemetryDecorator)
+            result = new StorageTelemetryDecorator(result);
+
+        if (_options.ApplyEventDecorator)
+        {
+            var dispatcher = _serviceProvider.GetService<IStorageEventDispatcher>();
+            if (dispatcher is not null)
+                result = new StorageEventDecorator(result, dispatcher);
+        }
+
+        return result;
     }
 }
