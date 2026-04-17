@@ -1,5 +1,6 @@
 using FluentAssertions;
 using ValiBlob.Core.Models;
+using ValiBlob.Core.Models.Crypto;
 using Xunit;
 
 namespace ValiBlob.Core.Tests;
