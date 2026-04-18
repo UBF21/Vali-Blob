@@ -1,7 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using ValiBlob.Core.Abstractions;
+using ValiBlob.Core.Events;
 using ValiBlob.Core.Options;
+using ValiBlob.Core.Providers;
 
 namespace ValiBlob.Core.DependencyInjection;
 

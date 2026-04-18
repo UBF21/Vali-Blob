@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging;
 
 namespace ValiBlob.Core.Events;
 
-public sealed class StorageEventDispatcher
+public sealed class StorageEventDispatcher : IStorageEventDispatcher
 {
     private readonly IEnumerable<IStorageEventHandler> _handlers;
     private readonly ILogger<StorageEventDispatcher> _logger;

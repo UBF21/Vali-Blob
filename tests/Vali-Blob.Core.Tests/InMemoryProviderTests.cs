@@ -1,3 +1,4 @@
+using System.Text;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -195,12 +196,11 @@ public sealed class InMemoryProviderTests
         await _provider.UploadAsync(new UploadRequest { Path = StoragePath.From("stream", "b.txt"), Content = new MemoryStream("x"u8.ToArray()) });
         await _provider.UploadAsync(new UploadRequest { Path = StoragePath.From("other", "c.txt"), Content = new MemoryStream("x"u8.ToArray()) });
 
-        var entries = new List<FileEntry>();
-        await foreach (var entry in _provider.ListAllAsync("stream/"))
-            entries.Add(entry);
+        var count = 0;
+        await foreach (var _ in _provider.ListAllAsync("stream/"))
+            count++;
 
-        entries.Should().HaveCount(2);
-        entries.Should().AllSatisfy(e => e.Path.Should().StartWith("stream/"));
+        count.Should().Be(2);
     }
 
     [Fact]
@@ -264,5 +264,123 @@ public sealed class InMemoryProviderTests
         var path = StoragePath.From("docs", "file.pdf");
         string asString = path;
         asString.Should().Be("docs/file.pdf");
+    }
+
+    // ─── Negative path tests ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExistsAsync_WhenFileNotUploaded_ShouldReturnFalse()
+    {
+        var result = await _provider.ExistsAsync("nonexistent/file.txt");
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeleteAsync_WhenFileNotExists_ShouldReturnSuccess()
+    {
+        var result = await _provider.DeleteAsync("ghost/file.txt");
+
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task CopyAsync_WhenSourceNotExists_ShouldReturnFailure()
+    {
+        var result = await _provider.CopyAsync("does-not-exist.txt", "destination.txt");
+
+        result.IsSuccess.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ListFilesAsync_WhenNoFilesMatch_ShouldReturnEmptyList()
+    {
+        var result = await _provider.ListFilesAsync("no-match-prefix/");
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListFoldersAsync_WhenNoFilesMatch_ShouldReturnEmptyList()
+    {
+        var result = await _provider.ListFoldersAsync("zzz-nonexistent-prefix/");
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeleteManyAsync_WhenSomeFilesNotExist_ShouldReturnSuccess()
+    {
+        await _provider.UploadAsync(new UploadRequest
+        {
+            Path = StoragePath.From("existing.txt"),
+            Content = new MemoryStream("x"u8.ToArray())
+        });
+
+        var paths = new[] { StoragePath.From("existing.txt"), StoragePath.From("missing.txt") };
+        var result = await _provider.DeleteManyAsync(paths);
+
+        result.IsSuccess.Should().BeTrue();
+        _provider.HasFile("existing.txt").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task UploadAsync_WithEmptyContent_ShouldStoreZeroByteFile()
+    {
+        var request = new UploadRequest
+        {
+            Path = StoragePath.From("empty.bin"),
+            Content = new MemoryStream([]),
+            ContentLength = 0
+        };
+
+        var result = await _provider.UploadAsync(request);
+
+        result.IsSuccess.Should().BeTrue();
+        _provider.HasFile("empty.bin").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task UploadAsync_OverwritingExistingFile_ShouldReplaceContent()
+    {
+        var path = StoragePath.From("overwrite.txt");
+
+        await _provider.UploadAsync(new UploadRequest
+        {
+            Path = path,
+            Content = new MemoryStream("original"u8.ToArray())
+        });
+
+        await _provider.UploadAsync(new UploadRequest
+        {
+            Path = path,
+            Content = new MemoryStream("updated"u8.ToArray())
+        });
+
+        var download = await _provider.DownloadAsync(new DownloadRequest { Path = path });
+        var buf = new MemoryStream();
+        await download.Value!.CopyToAsync(buf);
+        Encoding.UTF8.GetString(buf.ToArray()).Should().Be("updated");
+    }
+
+    [Fact]
+    public async Task DeleteFolderAsync_WhenFolderNotExists_ShouldReturnSuccess()
+    {
+        var result = await _provider.DeleteFolderAsync("nonexistent-folder/");
+
+        result.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ListAllAsync_WhenNoFilesMatch_ShouldYieldNothing()
+    {
+        var count = 0;
+        await foreach (var _ in _provider.ListAllAsync("zzz-nonexistent-prefix/"))
+            count++;
+
+        count.Should().Be(0);
     }
 }

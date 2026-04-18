@@ -16,9 +16,9 @@ namespace ValiBlob.Core.Providers;
 public sealed class StorageEventDecorator : IStorageProvider
 {
     private readonly IStorageProvider _inner;
-    private readonly StorageEventDispatcher _dispatcher;
+    private readonly IStorageEventDispatcher _dispatcher;
 
-    public StorageEventDecorator(IStorageProvider inner, StorageEventDispatcher dispatcher)
+    public StorageEventDecorator(IStorageProvider inner, IStorageEventDispatcher dispatcher)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));

@@ -49,6 +49,7 @@ public static class ServiceCollectionExtensions
 
         services.TryAddSingleton<IStorageFactory, StorageFactory>();
         services.TryAddSingleton<StorageEventDispatcher>();
+        services.TryAddSingleton<IStorageEventDispatcher>(sp => sp.GetRequiredService<StorageEventDispatcher>());
         services.TryAddSingleton<IStorageMigrator, StorageMigrator>();
 
         return new ValiStorageBuilder(services);
