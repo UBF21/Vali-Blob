@@ -27,6 +27,14 @@ public sealed class StorageGlobalOptions
     public bool ApplyEventDecorator { get; set; } = false;
 
     /// <summary>
+    /// Allowlist of hosts permitted in UploadFromUrlAsync.
+    /// When non-empty, only URLs whose host matches an entry are accepted.
+    /// Empty list = all hosts allowed (use only in trusted/internal environments).
+    /// Example: ["cdn.mycompany.com", "storage.googleapis.com"]
+    /// </summary>
+    public IReadOnlyList<string> AllowedUploadHosts { get; set; } = [];
+
+    /// <summary>
     /// Attempts to convert the DefaultProvider string to a StorageProviderType enum.
     /// Returns StorageProviderType.None if not found (custom provider or empty).
     /// </summary>

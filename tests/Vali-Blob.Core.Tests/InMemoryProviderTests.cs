@@ -383,4 +383,70 @@ public sealed class InMemoryProviderTests
 
         count.Should().Be(0);
     }
+    // ─── UploadFromUrl allowlist (via LocalStorageProvider — InMemory overrides UploadFromUrl) ──────
+
+    [Fact]
+    public async Task LocalProvider_UploadFromUrlAsync_WhenHostNotInAllowlist_ReturnsFailure()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempPath);
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+            services.Configure<ValiBlob.Local.Options.LocalStorageOptions>(o => { o.BasePath = tempPath; });
+            services.Configure<ValiBlob.Core.Options.ResilienceOptions>(_ => { });
+            services.Configure<ValiBlob.Core.Options.EncryptionOptions>(_ => { });
+            services.AddSingleton<ValiBlob.Core.Pipeline.StoragePipelineBuilder>();
+            var sp = services.BuildServiceProvider();
+
+            var localProvider = ActivatorUtilities.CreateInstance<ValiBlob.Local.LocalStorageProvider>(sp);
+            localProvider.SetAllowedUploadHosts(["cdn.trusted.com"]);
+
+            var result = await localProvider.UploadFromUrlAsync(
+                "http://evil.attacker.com/malware.bin",
+                StoragePath.From("dest.bin"));
+
+            result.IsSuccess.Should().BeFalse();
+            result.ErrorMessage.Should().Contain("allowed list");
+        }
+        finally
+        {
+            Directory.Delete(tempPath, true);
+        }
+    }
+
+    [Fact]
+    public async Task LocalProvider_UploadFromUrlAsync_WhenHostInAllowlist_PassesValidationCheck()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempPath);
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+            services.Configure<ValiBlob.Local.Options.LocalStorageOptions>(o => { o.BasePath = tempPath; });
+            services.Configure<ValiBlob.Core.Options.ResilienceOptions>(_ => { });
+            services.Configure<ValiBlob.Core.Options.EncryptionOptions>(_ => { });
+            services.AddSingleton<ValiBlob.Core.Pipeline.StoragePipelineBuilder>();
+            var sp = services.BuildServiceProvider();
+
+            var localProvider = ActivatorUtilities.CreateInstance<ValiBlob.Local.LocalStorageProvider>(sp);
+            localProvider.SetAllowedUploadHosts(["cdn.trusted.com"]);
+
+            // HTTP will fail (no real server) but allowlist check passes — error is NOT about allowlist
+            var result = await localProvider.UploadFromUrlAsync(
+                "https://cdn.trusted.com/image.png",
+                StoragePath.From("image.png"));
+
+            result.ErrorMessage.Should().NotContain("allowed list");
+        }
+        finally
+        {
+            Directory.Delete(tempPath, true);
+        }
+    }
+
 }

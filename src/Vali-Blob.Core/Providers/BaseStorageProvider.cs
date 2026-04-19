@@ -28,6 +28,7 @@ public abstract class BaseStorageProvider : IStorageProvider
     private readonly Func<string, HttpClient>? _httpClientFactory;
     private readonly DownloadTransformPipeline _downloadTransforms;
     private StorageEventDispatcher? _eventDispatcher;
+    private IReadOnlyList<string> _allowedUploadHosts = [];
 
     protected BaseStorageProvider(
         ILogger logger,
@@ -49,6 +50,11 @@ public abstract class BaseStorageProvider : IStorageProvider
     internal void SetEventDispatcher(StorageEventDispatcher dispatcher)
     {
         _eventDispatcher = dispatcher;
+    }
+
+    public void SetAllowedUploadHosts(IReadOnlyList<string> hosts)
+    {
+        _allowedUploadHosts = hosts;
     }
 
     public abstract string ProviderName { get; }
@@ -495,6 +501,17 @@ public abstract class BaseStorageProvider : IStorageProvider
     {
         try
         {
+            if (_allowedUploadHosts.Count > 0)
+            {
+                if (!Uri.TryCreate(sourceUrl, UriKind.Absolute, out var uri) ||
+                    !_allowedUploadHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase))
+                {
+                    return StorageResult<UploadResult>.Failure(
+                        $"URL host is not in the allowed list: '{sourceUrl}'",
+                        StorageErrorCode.ProviderError);
+                }
+            }
+
             using var httpClient = _httpClientFactory?.Invoke("vali-blob") ?? new HttpClient();
             using var response = await httpClient.GetAsync(sourceUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();

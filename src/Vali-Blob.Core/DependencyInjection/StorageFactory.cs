@@ -65,6 +65,9 @@ public sealed class StorageFactory : IStorageFactory
 
     private IStorageProvider ApplyDecorators(IStorageProvider provider)
     {
+        if (provider is BaseStorageProvider baseProvider && _options.AllowedUploadHosts.Count > 0)
+            baseProvider.SetAllowedUploadHosts(_options.AllowedUploadHosts);
+
         var result = provider;
 
         if (_options.ApplyTelemetryDecorator)
