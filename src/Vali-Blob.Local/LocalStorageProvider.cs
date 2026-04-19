@@ -172,10 +172,14 @@ public sealed class LocalStorageProvider : BaseStorageProvider, IResumableUpload
 
     protected override Task<StorageResult<string>> GetUrlCoreAsync(string path, CancellationToken cancellationToken)
     {
+        // Validate path containment before building any URL
+        ResolvePath(path);
+
         if (!string.IsNullOrEmpty(_options.PublicBaseUrl))
         {
             var baseUrl = _options.PublicBaseUrl!;
-            var url = $"{baseUrl.TrimEnd('/')}/{path.TrimStart('/')}";
+            var normalizedPath = path.Replace('\\', '/').TrimStart('/');
+            var url = $"{baseUrl.TrimEnd('/')}/{normalizedPath}";
             return Task.FromResult(StorageResult<string>.Success(url));
         }
 
@@ -728,7 +732,16 @@ public sealed class LocalStorageProvider : BaseStorageProvider, IResumableUpload
     private string GetSessionDir(string uploadId)
     {
         var basePath = Path.GetFullPath(_options.BasePath);
-        return Path.Combine(basePath, ".resumable", uploadId);
+        var resumableRoot = Path.Combine(basePath, ".resumable");
+        var sessionDir = Path.GetFullPath(Path.Combine(resumableRoot, uploadId));
+
+        if (!sessionDir.StartsWith(resumableRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(sessionDir, resumableRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Invalid uploadId: '{uploadId}'");
+        }
+
+        return sessionDir;
     }
 
     private static void SaveSessionJson(string sessionDir, ResumableUploadSession session)

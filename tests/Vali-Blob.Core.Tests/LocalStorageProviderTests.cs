@@ -435,4 +435,45 @@ public sealed class LocalStorageProviderTests : IDisposable
         result.IsSuccess.Should().BeTrue();
         result.Value.Should().StartWith("file://");
     }
+
+    // ─── Security: path traversal and uploadId validation ────────────────────
+
+    [Fact]
+    public async Task GetUrl_WithPathTraversal_ShouldReturnFailure()
+    {
+        var result = await _provider.GetUrlAsync("../../../etc/passwd");
+
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorMessage.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task UploadAsync_WithPathTraversal_ShouldReturnFailure()
+    {
+        var request = new UploadRequest
+        {
+            Path = StoragePath.From("../../etc/shadow"),
+            Content = new MemoryStream("x"u8.ToArray())
+        };
+
+        var result = await _provider.UploadAsync(request);
+
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorMessage.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task UploadChunkAsync_WithMaliciousUploadId_ShouldThrow()
+    {
+        var fakeRequest = new ResumableChunkRequest
+        {
+            UploadId = "../../malicious",
+            Data = new MemoryStream("x"u8.ToArray())
+        };
+
+        var act = async () => await _provider.UploadChunkAsync(fakeRequest);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Invalid uploadId*");
+    }
 }
