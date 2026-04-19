@@ -16,7 +16,7 @@
 - [ ] CRITICAL-4: No authentication en sample app
 - [ ] HIGH-1: Static IV en encriptación → IV aleatorio por operación
 - [x] HIGH-3: Chunk offset validation ✅
-- [ ] HIGH-4: Rate limiting
+- [x] HIGH-4: Rate limiting ✅
 
 ### Tests — v1.3 Blocker
 

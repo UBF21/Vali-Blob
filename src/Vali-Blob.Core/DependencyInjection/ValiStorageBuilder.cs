@@ -155,6 +155,20 @@ public sealed class ValiStorageBuilder
     }
 
     /// <summary>
+    /// Adds per-scope sliding-window rate limiting middleware.
+    /// Throws <see cref="Exceptions.StorageValidationException"/> when the limit is exceeded.
+    /// </summary>
+    public ValiStorageBuilder WithRateLimit(Action<RateLimitOptions> configure)
+    {
+        var opts = new RateLimitOptions { Enabled = true };
+        configure(opts);
+        Services.AddSingleton(opts);
+        Services.TryAddEnumerable(ServiceDescriptor.Singleton<IStorageMiddleware>(
+            new RateLimitMiddleware(opts)));
+        return this;
+    }
+
+    /// <summary>
     /// Adds conflict resolution middleware that checks whether a file already exists
     /// and acts according to <see cref="Models.ConflictResolution"/> set on each upload request.
     /// </summary>
