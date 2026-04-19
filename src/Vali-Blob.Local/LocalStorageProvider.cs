@@ -534,6 +534,27 @@ public sealed class LocalStorageProvider : BaseStorageProvider, IResumableUpload
             return StorageResult<ChunkUploadResult>.Failure("Session has been aborted.", StorageErrorCode.ValidationFailed);
         }
 
+        if (request.Offset < 0)
+        {
+            StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
+            return StorageResult<ChunkUploadResult>.Failure(
+                $"Chunk offset must be non-negative, got {request.Offset}.", StorageErrorCode.ValidationFailed);
+        }
+
+        if (session.TotalSize > 0 && request.Offset >= session.TotalSize)
+        {
+            StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
+            return StorageResult<ChunkUploadResult>.Failure(
+                $"Chunk offset {request.Offset} exceeds total file size {session.TotalSize}.", StorageErrorCode.ValidationFailed);
+        }
+
+        if (request.Length.HasValue && request.Length.Value <= 0)
+        {
+            StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
+            return StorageResult<ChunkUploadResult>.Failure(
+                $"Chunk length must be positive, got {request.Length.Value}.", StorageErrorCode.ValidationFailed);
+        }
+
         // Read chunk bytes
         byte[] chunkBytes;
         if (request.Length.HasValue)

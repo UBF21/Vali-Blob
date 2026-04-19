@@ -476,4 +476,70 @@ public sealed class LocalStorageProviderTests : IDisposable
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*Invalid uploadId*");
     }
+    // ─── Security: chunk offset validation ───────────────────────────────────
+
+    [Fact]
+    public async Task UploadChunkAsync_WithNegativeOffset_ShouldReturnFailure()
+    {
+        var startResult = await _provider.StartResumableUploadAsync(new ResumableUploadRequest
+        {
+            Path = StoragePath.From("chunk-test.txt"),
+            TotalSize = 100
+        });
+        startResult.IsSuccess.Should().BeTrue();
+
+        var result = await _provider.UploadChunkAsync(new ResumableChunkRequest
+        {
+            UploadId = startResult.Value!.UploadId,
+            Data = new MemoryStream("x"u8.ToArray()),
+            Offset = -1
+        });
+
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("non-negative");
+    }
+
+    [Fact]
+    public async Task UploadChunkAsync_WithOffsetBeyondTotalSize_ShouldReturnFailure()
+    {
+        var startResult = await _provider.StartResumableUploadAsync(new ResumableUploadRequest
+        {
+            Path = StoragePath.From("chunk-test2.txt"),
+            TotalSize = 50
+        });
+        startResult.IsSuccess.Should().BeTrue();
+
+        var result = await _provider.UploadChunkAsync(new ResumableChunkRequest
+        {
+            UploadId = startResult.Value!.UploadId,
+            Data = new MemoryStream("x"u8.ToArray()),
+            Offset = 100
+        });
+
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("exceeds total file size");
+    }
+
+    [Fact]
+    public async Task UploadChunkAsync_WithZeroLength_ShouldReturnFailure()
+    {
+        var startResult = await _provider.StartResumableUploadAsync(new ResumableUploadRequest
+        {
+            Path = StoragePath.From("chunk-test3.txt"),
+            TotalSize = 100
+        });
+        startResult.IsSuccess.Should().BeTrue();
+
+        var result = await _provider.UploadChunkAsync(new ResumableChunkRequest
+        {
+            UploadId = startResult.Value!.UploadId,
+            Data = new MemoryStream("x"u8.ToArray()),
+            Offset = 0,
+            Length = 0
+        });
+
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("positive");
+    }
+
 }
