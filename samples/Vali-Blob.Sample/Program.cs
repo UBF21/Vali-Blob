@@ -1,4 +1,8 @@
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using System.Security.Claims;
+using System.Text.Encodings.Web;
 using Microsoft.Extensions.Logging;
 using ValiBlob.Core.Abstractions;
 using ValiBlob.Core.DependencyInjection;
@@ -75,10 +79,19 @@ builder.Services.AddValiBlob()
 // .NET 9 built-in OpenAPI (no Swashbuckle package required)
 builder.Services.AddOpenApi();
 
+// ─── API Key authentication ───────────────────────────────────────────────────
+// Read the key from configuration. In production: use secrets manager, not appsettings.
+// Set ValiBlob:ApiKey via environment variable or user-secrets before running.
+builder.Services.AddAuthentication("ApiKey")
+    .AddScheme<ApiKeyAuthOptions, ApiKeyAuthHandler>("ApiKey", _ => { });
+builder.Services.AddAuthorization();
+
 var app = builder.Build();
 
 app.MapOpenApi();
 app.MapHealthChecks("/health");
+app.UseAuthentication();
+app.UseAuthorization();
 
 // ─── Helper: resolve default provider via factory ────────────────────────────
 // Providers are keyed services; use IStorageFactory to resolve by name.
@@ -105,7 +118,8 @@ app.MapPost("/files/{*path}", async (
         ? Results.Ok(new { result.Value!.Path, result.Value.SizeBytes, result.Value.ETag })
         : Results.BadRequest(result.ErrorMessage);
 })
-.DisableAntiforgery();
+.DisableAntiforgery()
+.RequireAuthorization();
 
 // ─── Download ─────────────────────────────────────────────────────────────────
 app.MapGet("/files/{*path}", async (string path, IServiceProvider sp) =>
@@ -128,7 +142,8 @@ app.MapDelete("/files/{*path}", async (string path, IServiceProvider sp) =>
     var storage = GetProvider(sp);
     var result = await storage.DeleteAsync(path);
     return result.IsSuccess ? Results.NoContent() : Results.NotFound(result.ErrorMessage);
-});
+})
+.RequireAuthorization();
 
 // ─── Exists ───────────────────────────────────────────────────────────────────
 // path passed as query string to avoid catch-all routing limitation
@@ -139,7 +154,8 @@ app.MapGet("/files/exists", async (string path, IServiceProvider sp) =>
     return result.IsSuccess
         ? Results.Ok(new { path, exists = result.Value })
         : Results.BadRequest(result.ErrorMessage);
-});
+})
+.RequireAuthorization();
 
 // ─── List files ───────────────────────────────────────────────────────────────
 app.MapGet("/files", async (string? prefix, IServiceProvider sp) =>
@@ -149,7 +165,8 @@ app.MapGet("/files", async (string? prefix, IServiceProvider sp) =>
     return result.IsSuccess
         ? Results.Ok(result.Value)
         : Results.BadRequest(result.ErrorMessage);
-});
+})
+.RequireAuthorization();
 
 // ─── Metadata ─────────────────────────────────────────────────────────────────
 // path passed as query string to avoid catch-all routing limitation
@@ -158,7 +175,8 @@ app.MapGet("/files/metadata", async (string path, IServiceProvider sp) =>
     var storage = GetProvider(sp);
     var result = await storage.GetMetadataAsync(path);
     return result.IsSuccess ? Results.Ok(result.Value) : Results.NotFound(result.ErrorMessage);
-});
+})
+.RequireAuthorization();
 
 // ─── Copy ─────────────────────────────────────────────────────────────────────
 app.MapPost("/files/copy", async (
@@ -171,7 +189,8 @@ app.MapPost("/files/copy", async (
     return result.IsSuccess
         ? Results.Ok(new { source = sourcePath, destination })
         : Results.BadRequest(result.ErrorMessage);
-});
+})
+.RequireAuthorization();
 
 // ─── Multi-provider example using IStorageFactory ────────────────────────────
 // Shows how to target a specific named provider at runtime.
@@ -278,6 +297,38 @@ app.MapDelete("/uploads/{uploadId}", async (string uploadId, IServiceProvider sp
 });
 
 app.Run();
+
+// ─── API Key auth handler ────────────────────────────────────────────────────
+public sealed class ApiKeyAuthOptions : AuthenticationSchemeOptions { }
+
+public sealed class ApiKeyAuthHandler : AuthenticationHandler<ApiKeyAuthOptions>
+{
+    private const string ApiKeyHeader = "X-Api-Key";
+
+    public ApiKeyAuthHandler(
+        IOptionsMonitor<ApiKeyAuthOptions> options,
+        ILoggerFactory logger,
+        UrlEncoder encoder)
+        : base(options, logger, encoder) { }
+
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    {
+        var configuredKey = Context.RequestServices
+            .GetRequiredService<IConfiguration>()["ValiBlob:ApiKey"];
+
+        if (string.IsNullOrWhiteSpace(configuredKey))
+            return Task.FromResult(AuthenticateResult.NoResult());
+
+        if (!Request.Headers.TryGetValue(ApiKeyHeader, out var providedKey)
+            || !string.Equals(configuredKey, providedKey, StringComparison.Ordinal))
+        {
+            return Task.FromResult(AuthenticateResult.Fail("Invalid or missing X-Api-Key header."));
+        }
+
+        var identity = new ClaimsIdentity([new Claim(ClaimTypes.Name, "api-client")], Scheme.Name);
+        return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name)));
+    }
+}
 
 // ─── Request models ───────────────────────────────────────────────────────────
 record StartUploadRequest(string Path, string ContentType, long TotalSize);

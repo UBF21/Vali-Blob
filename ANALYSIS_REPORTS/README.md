@@ -8,16 +8,6 @@
 
 ## 🎯 Pendientes activos
 
-### Seguridad — v1.3 Blocker
-
-- [x] CRITICAL-3: Validate uploadId (path traversal en GetSessionDir) ✅
-- [x] CRITICAL-1: Path containment en GetUrlCoreAsync con PublicBaseUrl ✅
-- [x] CRITICAL-2: SSRF en UploadFromUrlAsync — URL allowlist ✅
-- [ ] CRITICAL-4: No authentication en sample app
-- [ ] HIGH-1: Static IV en encriptación → IV aleatorio por operación
-- [x] HIGH-3: Chunk offset validation ✅
-- [x] HIGH-4: Rate limiting ✅
-
 ### Tests — v1.3 Blocker
 
 - [x] StorageFactoryTests + ValiStorageBuilderTests + ServiceCollectionExtensionsTests ✅
