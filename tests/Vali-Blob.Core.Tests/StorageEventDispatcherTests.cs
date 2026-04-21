@@ -179,3 +179,166 @@ public sealed class StorageEventDispatcherTests
             Arg.Any<Func<object, Exception?, string>>());
     }
 }
+
+// ─── StorageEventContext ──────────────────────────────────────────────────────
+
+public sealed class StorageEventContextTests
+{
+    [Fact]
+    public void Context_WithRequiredProperties_IsCreated()
+    {
+        var ctx = new StorageEventContext
+        {
+            ProviderName = "AWS",
+            OperationType = "Upload"
+        };
+
+        ctx.ProviderName.Should().Be("AWS");
+        ctx.OperationType.Should().Be("Upload");
+    }
+
+    [Fact]
+    public void Context_DefaultIsSuccess_IsFalse()
+    {
+        var ctx = new StorageEventContext { ProviderName = "Local", OperationType = "Delete" };
+        ctx.IsSuccess.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Context_DefaultDuration_IsZero()
+    {
+        var ctx = new StorageEventContext { ProviderName = "Local", OperationType = "Upload" };
+        ctx.Duration.Should().Be(TimeSpan.Zero);
+    }
+
+    [Fact]
+    public void Context_DefaultExtra_IsEmptyDictionary()
+    {
+        var ctx = new StorageEventContext { ProviderName = "Local", OperationType = "Upload" };
+        ctx.Extra.Should().NotBeNull().And.BeEmpty();
+    }
+
+    [Fact]
+    public void Context_DefaultPath_IsNull()
+    {
+        var ctx = new StorageEventContext { ProviderName = "Local", OperationType = "Upload" };
+        ctx.Path.Should().BeNull();
+    }
+
+    [Fact]
+    public void Context_DefaultErrorMessage_IsNull()
+    {
+        var ctx = new StorageEventContext { ProviderName = "Local", OperationType = "Upload" };
+        ctx.ErrorMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public void Context_DefaultFileSizeBytes_IsNull()
+    {
+        var ctx = new StorageEventContext { ProviderName = "Local", OperationType = "Upload" };
+        ctx.FileSizeBytes.Should().BeNull();
+    }
+
+    [Fact]
+    public void Context_WithAllProperties_StoresCorrectly()
+    {
+        var extra = new Dictionary<string, object> { ["key"] = "value" };
+        var ctx = new StorageEventContext
+        {
+            ProviderName = "Azure",
+            OperationType = "Download",
+            Path = "folder/file.txt",
+            IsSuccess = true,
+            ErrorMessage = null,
+            Duration = TimeSpan.FromMilliseconds(120),
+            FileSizeBytes = 4096L,
+            Extra = extra
+        };
+
+        ctx.ProviderName.Should().Be("Azure");
+        ctx.OperationType.Should().Be("Download");
+        ctx.Path.Should().Be("folder/file.txt");
+        ctx.IsSuccess.Should().BeTrue();
+        ctx.Duration.Should().Be(TimeSpan.FromMilliseconds(120));
+        ctx.FileSizeBytes.Should().Be(4096L);
+        ctx.Extra.Should().ContainKey("key");
+    }
+}
+
+// ─── StorageEventHandlerBase ──────────────────────────────────────────────────
+
+public sealed class StorageEventHandlerBaseTests
+{
+    private sealed class ConcreteHandler : StorageEventHandlerBase { }
+
+    private sealed class OverridingHandler : StorageEventHandlerBase
+    {
+        public bool UploadCompletedCalled { get; private set; }
+
+        public override Task OnUploadCompletedAsync(StorageEventContext context, CancellationToken cancellationToken = default)
+        {
+            UploadCompletedCalled = true;
+            return Task.CompletedTask;
+        }
+    }
+
+    private static StorageEventContext MakeContext() => new()
+    {
+        ProviderName = "InMemory",
+        OperationType = "Upload"
+    };
+
+    [Fact]
+    public void ConcreteHandler_CanBeInstantiated()
+    {
+        var handler = new ConcreteHandler();
+        handler.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task OnUploadCompletedAsync_DefaultImplementation_DoesNotThrow()
+    {
+        var handler = new ConcreteHandler();
+        var act = async () => await handler.OnUploadCompletedAsync(MakeContext());
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task OnUploadFailedAsync_DefaultImplementation_DoesNotThrow()
+    {
+        var handler = new ConcreteHandler();
+        var act = async () => await handler.OnUploadFailedAsync(MakeContext());
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task OnDownloadCompletedAsync_DefaultImplementation_DoesNotThrow()
+    {
+        var handler = new ConcreteHandler();
+        var act = async () => await handler.OnDownloadCompletedAsync(MakeContext());
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task OnDeleteCompletedAsync_DefaultImplementation_DoesNotThrow()
+    {
+        var handler = new ConcreteHandler();
+        var act = async () => await handler.OnDeleteCompletedAsync(MakeContext());
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task OverriddenMethod_IsCalledInsteadOfBase()
+    {
+        var handler = new OverridingHandler();
+        await handler.OnUploadCompletedAsync(MakeContext());
+        handler.UploadCompletedCalled.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ConcreteHandler_ImplementsIStorageEventHandler()
+    {
+        var handler = new ConcreteHandler();
+        handler.Should().BeAssignableTo<IStorageEventHandler>();
+    }
+}

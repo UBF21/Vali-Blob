@@ -1,3 +1,4 @@
+using System.Net.Http;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -5,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ValiBlob.Core.Abstractions;
 using ValiBlob.Core.DependencyInjection;
+using ValiBlob.Core.Exceptions;
 using ValiBlob.Core.Models;
 using ValiBlob.Core.Options;
 using ValiBlob.Core.Pipeline;
@@ -48,6 +50,8 @@ public sealed class LocalStorageProviderTests : IDisposable
                 builder.Use(m);
             return builder;
         });
+
+        services.AddSingleton<Func<string, HttpClient>>(_ => _ => new HttpClient());
 
         var sp = services.BuildServiceProvider();
         _provider = ActivatorUtilities.CreateInstance<LocalStorageProvider>(sp);
@@ -420,6 +424,7 @@ public sealed class LocalStorageProviderTests : IDisposable
             foreach (var m in middlewares) b.Use(m);
             return b;
         });
+        services.AddSingleton<Func<string, HttpClient>>(_ => _ => new HttpClient());
 
         var sp = services.BuildServiceProvider();
         var noUrlProvider = ActivatorUtilities.CreateInstance<LocalStorageProvider>(sp);
@@ -473,7 +478,7 @@ public sealed class LocalStorageProviderTests : IDisposable
 
         var act = async () => await _provider.UploadChunkAsync(fakeRequest);
 
-        await act.Should().ThrowAsync<InvalidOperationException>()
+        await act.Should().ThrowAsync<StorageValidationException>()
             .WithMessage("*Invalid uploadId*");
     }
     // ─── Security: chunk offset validation ───────────────────────────────────

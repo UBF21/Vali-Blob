@@ -43,7 +43,7 @@ public sealed class DeduplicationMiddlewareTests
     {
         var provider = BuildProvider();
         var options = new DeduplicationOptions { Enabled = false };
-        var mw = new DeduplicationMiddleware(provider, options);
+        var mw = new DeduplicationMiddleware(provider, options, new InMemoryDeduplicationHashIndex());
         var ctx = MakeContext(new byte[] { 1, 2, 3 });
 
         await mw.InvokeAsync(ctx, NoOpNext);
@@ -58,7 +58,7 @@ public sealed class DeduplicationMiddlewareTests
     {
         var provider = BuildProvider();
         var options = new DeduplicationOptions { Enabled = true, CheckBeforeUpload = true };
-        var mw = new DeduplicationMiddleware(provider, options);
+        var mw = new DeduplicationMiddleware(provider, options, new InMemoryDeduplicationHashIndex());
         var ctx = MakeContext(new byte[] { 10, 20, 30 });
 
         var nextCalled = false;
@@ -80,7 +80,7 @@ public sealed class DeduplicationMiddlewareTests
     {
         var provider = BuildProvider();
         var options = new DeduplicationOptions { Enabled = true, CheckBeforeUpload = true };
-        var mw = new DeduplicationMiddleware(provider, options);
+        var mw = new DeduplicationMiddleware(provider, options, new InMemoryDeduplicationHashIndex());
 
         var content = new byte[] { 0xAA, 0xBB, 0xCC, 0xDD };
 
@@ -106,7 +106,7 @@ public sealed class DeduplicationMiddlewareTests
     {
         var provider = BuildProvider();
         var options = new DeduplicationOptions { Enabled = true, CheckBeforeUpload = true };
-        var mw = new DeduplicationMiddleware(provider, options);
+        var mw = new DeduplicationMiddleware(provider, options, new InMemoryDeduplicationHashIndex());
 
         var content1 = new byte[] { 1, 2, 3, 4 };
         var content2 = new byte[] { 5, 6, 7, 8 };
@@ -127,7 +127,7 @@ public sealed class DeduplicationMiddlewareTests
     {
         var provider = BuildProvider();
         var options = new DeduplicationOptions { Enabled = true };
-        var mw = new DeduplicationMiddleware(provider, options);
+        var mw = new DeduplicationMiddleware(provider, options, new InMemoryDeduplicationHashIndex());
         var ctx = MakeContext(new byte[] { 0x01, 0x02 });
 
         await mw.InvokeAsync(ctx, NoOpNext);
@@ -143,7 +143,7 @@ public sealed class DeduplicationMiddlewareTests
     {
         var provider = BuildProvider();
         var options = new DeduplicationOptions { Enabled = true, CheckBeforeUpload = true };
-        var mw = new DeduplicationMiddleware(provider, options);
+        var mw = new DeduplicationMiddleware(provider, options, new InMemoryDeduplicationHashIndex());
 
         var content = new byte[] { 0x11, 0x22, 0x33 };
 
@@ -169,7 +169,7 @@ public sealed class DeduplicationMiddlewareTests
             Enabled = true,
             CheckBeforeUpload = false
         };
-        var mw = new DeduplicationMiddleware(provider, options);
+        var mw = new DeduplicationMiddleware(provider, options, new InMemoryDeduplicationHashIndex());
 
         var content = new byte[] { 0xDE, 0xAD, 0xBE, 0xEF };
 
@@ -193,7 +193,7 @@ public sealed class DeduplicationMiddlewareTests
     {
         var provider = BuildProvider();
         var options = new DeduplicationOptions { Enabled = true, CheckBeforeUpload = false };
-        var mw = new DeduplicationMiddleware(provider, options);
+        var mw = new DeduplicationMiddleware(provider, options, new InMemoryDeduplicationHashIndex());
 
         var content = new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 };
         var ctx = MakeContext(content);

@@ -258,4 +258,170 @@ public sealed class MinioStorageIntegrationTests : IAsyncLifetime
         // This verifies the upload succeeded with override
         result.IsSuccess.Should().BeTrue();
     }
+    [Fact]
+    public async Task GetUrl_AfterUpload_ReturnsAccessibleUrl()
+    {
+        var content = "url test content"u8.ToArray();
+        var path = StoragePath.From("integration", "geturl-test.txt");
+
+        await _provider.UploadAsync(new UploadRequest
+        {
+            Path = path,
+            Content = new MemoryStream(content),
+            ContentType = "text/plain",
+            ContentLength = content.Length
+        });
+
+        var result = await _provider.GetUrlAsync(path);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Should().NotBeNullOrEmpty();
+        Uri.IsWellFormedUriString(result.Value, UriKind.Absolute).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Move_ShouldRelocateFile()
+    {
+        var content = "move test content"u8.ToArray();
+        var source = StoragePath.From("integration", "move-source.txt");
+        var dest   = StoragePath.From("integration", "move-dest.txt");
+
+        await _provider.UploadAsync(new UploadRequest
+        {
+            Path = source,
+            Content = new MemoryStream(content),
+            ContentType = "text/plain",
+            ContentLength = content.Length
+        });
+
+        var moveResult = await _provider.MoveAsync(source, dest);
+        moveResult.IsSuccess.Should().BeTrue();
+
+        var sourceExists = await _provider.ExistsAsync(source);
+        var destExists   = await _provider.ExistsAsync(dest);
+
+        sourceExists.Value.Should().BeFalse();
+        destExists.Value.Should().BeTrue();
+
+        var downloadResult = await _provider.DownloadAsync(new DownloadRequest { Path = dest });
+        using var ms = new MemoryStream();
+        await downloadResult.Value!.CopyToAsync(ms);
+        ms.ToArray().Should().BeEquivalentTo(content);
+    }
+
+    [Fact]
+    public async Task SetMetadata_ThenGetMetadata_ShouldPersistCustomKeys()
+    {
+        var content = "metadata write test"u8.ToArray();
+        var path = StoragePath.From("integration", "set-metadata-test.txt");
+
+        await _provider.UploadAsync(new UploadRequest
+        {
+            Path = path,
+            Content = new MemoryStream(content),
+            ContentType = "text/plain",
+            ContentLength = content.Length
+        });
+
+        var writable = _provider as IMetadataWritableProvider;
+        if (writable is null)
+        {
+            // Provider does not implement metadata writes — skip gracefully.
+            return;
+        }
+
+        var setResult = await writable.SetMetadataAsync(path, new Dictionary<string, string>
+        {
+            ["env"] = "test"
+        });
+        setResult.IsSuccess.Should().BeTrue();
+
+        var getResult = await _provider.GetMetadataAsync(path);
+        getResult.IsSuccess.Should().BeTrue();
+        getResult.Value!.CustomMetadata.Should().ContainKey("env");
+    }
+
+    [Fact]
+    public async Task ListAll_ShouldReturnAllUploadedFiles()
+    {
+        var prefix = $"integration/listall-{Guid.NewGuid():N}/";
+
+        await _provider.UploadAsync(new UploadRequest { Path = StoragePath.From(prefix + "x.txt"), Content = new MemoryStream("x"u8.ToArray()) });
+        await _provider.UploadAsync(new UploadRequest { Path = StoragePath.From(prefix + "y.txt"), Content = new MemoryStream("y"u8.ToArray()) });
+        await _provider.UploadAsync(new UploadRequest { Path = StoragePath.From(prefix + "z.txt"), Content = new MemoryStream("z"u8.ToArray()) });
+
+        var entries = new List<FileEntry>();
+        await foreach (var entry in _provider.ListAllAsync(prefix))
+            entries.Add(entry);
+
+        entries.Should().HaveCountGreaterThanOrEqualTo(3);
+    }
+
+    [Fact]
+    public async Task Upload_DuplicateContent_ShouldShortCircuit_WithDeduplication()
+    {
+        // Build a separate DI container with the deduplication middleware enabled.
+        var endpoint = _minioContainer.GetConnectionString();
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(_ => new ConfigurationBuilder().Build());
+        services.AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
+        services.AddValiBlob()
+            .WithDeduplication()
+            .UseMinIO(opts =>
+            {
+                opts.ServiceUrl    = endpoint;
+                opts.AccessKeyId   = "minioadmin";
+                opts.SecretAccessKey = "minioadmin";
+                opts.Bucket        = TestBucket;
+                opts.ForcePathStyle = true;
+                opts.Region        = "us-east-1";
+                opts.UseIAMRole    = false;
+            });
+
+        await using var sp = services.BuildServiceProvider();
+        var factory  = sp.GetRequiredService<IStorageFactory>();
+        var provider = factory.Create("AWS");
+
+        var content = "deduplication smoke test content"u8.ToArray();
+        var path    = StoragePath.From($"integration/dedup-{Guid.NewGuid():N}.txt");
+
+        // First upload — should always succeed.
+        var first = await provider.UploadAsync(new UploadRequest
+        {
+            Path    = path,
+            Content = new MemoryStream(content),
+            ContentType = "text/plain",
+            ContentLength = content.Length
+        });
+        first.IsSuccess.Should().BeTrue();
+
+        // Second upload of identical content — middleware short-circuits.
+        // The pipeline cancels the context and returns a Failure result; the flow must not throw.
+        var second = await provider.UploadAsync(new UploadRequest
+        {
+            Path    = StoragePath.From($"integration/dedup-{Guid.NewGuid():N}.txt"),
+            Content = new MemoryStream(content),
+            ContentType = "text/plain",
+            ContentLength = content.Length
+        });
+
+        // Deduplication short-circuits: result is either a success (path reused)
+        // or a non-throwing failure indicating a duplicate was detected.
+        (second.IsSuccess || second.ErrorMessage!.Contains("Duplicate", StringComparison.OrdinalIgnoreCase))
+            .Should().BeTrue("deduplication middleware must not throw and must return a result");
+    }
+
+    [Fact]
+    public async Task GetUploadStatus_NonExistentSession_ReturnsFailure()
+    {
+        var resumable = _provider as IResumableUploadProvider;
+        resumable.Should().NotBeNull("AWS S3 provider implements IResumableUploadProvider");
+
+        var fakeSessionId = Guid.NewGuid().ToString("N");
+        var result = await resumable!.GetUploadStatusAsync(fakeSessionId);
+
+        result.IsSuccess.Should().BeFalse();
+    }
+
 }

@@ -3,10 +3,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using ValiBlob.Core.Abstractions;
+using ValiBlob.Core.Cdn;
 using ValiBlob.Core.DependencyInjection;
 using ValiBlob.Core.Events;
 using ValiBlob.Core.Options;
+using ValiBlob.Core.Pipeline.Middlewares;
 using ValiBlob.Core.Providers;
+using ValiBlob.Core.Quota;
+using ValiBlob.Core.Resumable;
+using ValiBlob.Core.Security;
 using Xunit;
 
 using Microsoft.Extensions.Configuration;
@@ -296,12 +301,256 @@ public sealed class ValiStorageBuilderTests
         result.Should().BeSameAs(builder);
     }
 
+    [Fact]
+    public void WithResiliencePolicies_ConfiguresRetryCount()
+    {
+        var (builder, services) = CreateBuilder();
+
+        builder.WithResiliencePolicies(o => o.RetryCount = 7);
+
+        var sp = services.BuildServiceProvider();
+        var opts = sp.GetRequiredService<IOptions<ResilienceOptions>>().Value;
+        opts.RetryCount.Should().Be(7);
+    }
+
+    [Fact]
+    public void WithResiliencePolicies_ReturnsSameBuilder()
+    {
+        var (builder, _) = CreateBuilder();
+        var result = builder.WithResiliencePolicies(o => o.RetryCount = 1);
+        result.Should().BeSameAs(builder);
+    }
+
+    [Fact]
+    public void WithPipeline_InvokesConfigureCallback()
+    {
+        var (builder, _) = CreateBuilder();
+        var called = false;
+
+        builder.WithPipeline(_ => called = true);
+
+        called.Should().BeTrue();
+    }
+
+    [Fact]
+    public void WithPipeline_ReturnsSameBuilder()
+    {
+        var (builder, _) = CreateBuilder();
+        var result = builder.WithPipeline(_ => { });
+        result.Should().BeSameAs(builder);
+    }
+
+    [Fact]
+    public void WithResumableUploads_ConfiguresSessionExpiration()
+    {
+        var (builder, services) = CreateBuilder();
+
+        builder.WithResumableUploads(o => o.SessionExpiration = TimeSpan.FromHours(48));
+
+        var sp = services.BuildServiceProvider();
+        var opts = sp.GetRequiredService<IOptions<ResumableUploadOptions>>().Value;
+        opts.SessionExpiration.Should().Be(TimeSpan.FromHours(48));
+    }
+
+    [Fact]
+    public void WithResumableUploads_ReturnsSameBuilder()
+    {
+        var (builder, _) = CreateBuilder();
+        var result = builder.WithResumableUploads(_ => { });
+        result.Should().BeSameAs(builder);
+    }
+
+    [Fact]
+    public void UseResumableSessionStore_ReplacesDefaultWithCustomStore()
+    {
+        var (builder, services) = CreateBuilder();
+
+        builder.UseResumableSessionStore<FakeResumableSessionStore>();
+
+        var sp = services.BuildServiceProvider();
+        var store = sp.GetRequiredService<IResumableSessionStore>();
+        store.Should().BeOfType<FakeResumableSessionStore>();
+    }
+
+    [Fact]
+    public void UseResumableSessionStore_ReturnsSameBuilder()
+    {
+        var (builder, _) = CreateBuilder();
+        var result = builder.UseResumableSessionStore<FakeResumableSessionStore>();
+        result.Should().BeSameAs(builder);
+    }
+
+    [Fact]
+    public void WithCdn_ConfiguresBaseUrl()
+    {
+        var (builder, services) = CreateBuilder();
+
+        builder.WithCdn(o => o.BaseUrl = "https://cdn.example.com");
+
+        var sp = services.BuildServiceProvider();
+        var opts = sp.GetRequiredService<IOptions<CdnOptions>>().Value;
+        opts.BaseUrl.Should().Be("https://cdn.example.com");
+    }
+
+    [Fact]
+    public void WithCdn_RegistersICdnProvider()
+    {
+        var (builder, services) = CreateBuilder();
+
+        builder.WithCdn(o => o.BaseUrl = "https://cdn.example.com");
+
+        var sp = services.BuildServiceProvider();
+        sp.GetService<ICdnProvider>().Should().NotBeNull().And.BeOfType<PrefixCdnProvider>();
+    }
+
+    [Fact]
+    public void WithCdn_ReturnsSameBuilder()
+    {
+        var (builder, _) = CreateBuilder();
+        var result = builder.WithCdn(_ => { });
+        result.Should().BeSameAs(builder);
+    }
+
+    [Fact]
+    public void WithContentTypeDetection_RegistersMiddleware()
+    {
+        var (builder, services) = CreateBuilder();
+
+        builder.WithContentTypeDetection();
+
+        services.Any(d => d.ImplementationType == typeof(ContentTypeDetectionMiddleware))
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void WithContentTypeDetection_ReturnsSameBuilder()
+    {
+        var (builder, _) = CreateBuilder();
+        var result = builder.WithContentTypeDetection();
+        result.Should().BeSameAs(builder);
+    }
+
+    [Fact]
+    public void WithDeduplication_RegistersMiddleware()
+    {
+        var (builder, services) = CreateBuilder();
+
+        builder.WithDeduplication();
+
+        services.Any(d => d.ImplementationType == typeof(DeduplicationMiddleware))
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void WithDeduplication_ReturnsSameBuilder()
+    {
+        var (builder, _) = CreateBuilder();
+        var result = builder.WithDeduplication();
+        result.Should().BeSameAs(builder);
+    }
+
+    [Fact]
+    public void WithVirusScanning_WithoutScanner_RegistersNoOpVirusScanner()
+    {
+        var (builder, services) = CreateBuilder();
+
+        builder.WithVirusScanning();
+
+        var sp = services.BuildServiceProvider();
+        sp.GetService<IVirusScanner>().Should().NotBeNull().And.BeOfType<NoOpVirusScanner>();
+    }
+
+    [Fact]
+    public void WithVirusScanning_WithCustomScanner_RegistersProvidedInstance()
+    {
+        var (builder, services) = CreateBuilder();
+        var customScanner = Substitute.For<IVirusScanner>();
+
+        builder.WithVirusScanning(customScanner);
+
+        var sp = services.BuildServiceProvider();
+        sp.GetService<IVirusScanner>().Should().BeSameAs(customScanner);
+    }
+
+    [Fact]
+    public void WithVirusScanning_ReturnsSameBuilder()
+    {
+        var (builder, _) = CreateBuilder();
+        var result = builder.WithVirusScanning();
+        result.Should().BeSameAs(builder);
+    }
+
+    [Fact]
+    public void WithStorageQuota_RegistersQuotaMiddleware()
+    {
+        var (builder, services) = CreateBuilder();
+
+        builder.WithStorageQuota(o => o.DefaultLimitBytes = 100 * 1024 * 1024);
+
+        services.Any(d => d.ImplementationType == typeof(QuotaMiddleware))
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void WithStorageQuota_ReturnsSameBuilder()
+    {
+        var (builder, _) = CreateBuilder();
+        var result = builder.WithStorageQuota(o => o.DefaultLimitBytes = 1024);
+        result.Should().BeSameAs(builder);
+    }
+
+    [Fact]
+    public void WithRateLimit_RegistersRateLimitMiddleware()
+    {
+        var (builder, services) = CreateBuilder();
+
+        builder.WithRateLimit(o => { o.MaxRequestsPerWindow = 100; o.Window = TimeSpan.FromMinutes(1); });
+
+        services.Any(d => d.ImplementationInstance is RateLimitMiddleware)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void WithRateLimit_ReturnsSameBuilder()
+    {
+        var (builder, _) = CreateBuilder();
+        var result = builder.WithRateLimit(o => { o.MaxRequestsPerWindow = 10; o.Window = TimeSpan.FromSeconds(1); });
+        result.Should().BeSameAs(builder);
+    }
+
+    [Fact]
+    public void WithConflictResolution_RegistersMiddleware()
+    {
+        var (builder, services) = CreateBuilder();
+
+        builder.WithConflictResolution();
+
+        services.Any(d => d.ImplementationType == typeof(ConflictResolutionMiddleware))
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void WithConflictResolution_ReturnsSameBuilder()
+    {
+        var (builder, _) = CreateBuilder();
+        var result = builder.WithConflictResolution();
+        result.Should().BeSameAs(builder);
+    }
+
     private sealed class FakeEventHandler : IStorageEventHandler
     {
         public Task OnUploadCompletedAsync(StorageEventContext context, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task OnUploadFailedAsync(StorageEventContext context, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task OnDownloadCompletedAsync(StorageEventContext context, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task OnDeleteCompletedAsync(StorageEventContext context, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class FakeResumableSessionStore : IResumableSessionStore
+    {
+        public Task SaveAsync(ValiBlob.Core.Models.ResumableUploadSession session, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<ValiBlob.Core.Models.ResumableUploadSession?> GetAsync(string uploadId, CancellationToken cancellationToken = default) => Task.FromResult<ValiBlob.Core.Models.ResumableUploadSession?>(null);
+        public Task UpdateAsync(ValiBlob.Core.Models.ResumableUploadSession session, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task DeleteAsync(string uploadId, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }
 

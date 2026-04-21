@@ -399,6 +399,7 @@ public sealed class InMemoryProviderTests
             services.Configure<ValiBlob.Core.Options.ResilienceOptions>(_ => { });
             services.Configure<ValiBlob.Core.Options.EncryptionOptions>(_ => { });
             services.AddSingleton<ValiBlob.Core.Pipeline.StoragePipelineBuilder>();
+            services.AddSingleton<Func<string, System.Net.Http.HttpClient>>(_ => _ => new System.Net.Http.HttpClient());
             var sp = services.BuildServiceProvider();
 
             var localProvider = ActivatorUtilities.CreateInstance<ValiBlob.Local.LocalStorageProvider>(sp);
@@ -431,6 +432,7 @@ public sealed class InMemoryProviderTests
             services.Configure<ValiBlob.Core.Options.ResilienceOptions>(_ => { });
             services.Configure<ValiBlob.Core.Options.EncryptionOptions>(_ => { });
             services.AddSingleton<ValiBlob.Core.Pipeline.StoragePipelineBuilder>();
+            services.AddSingleton<Func<string, System.Net.Http.HttpClient>>(_ => _ => new System.Net.Http.HttpClient());
             var sp = services.BuildServiceProvider();
 
             var localProvider = ActivatorUtilities.CreateInstance<ValiBlob.Local.LocalStorageProvider>(sp);
