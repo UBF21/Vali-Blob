@@ -37,8 +37,9 @@ public sealed class SupabaseStorageProvider : BaseStorageProvider, IPresignedUrl
         IOptions<EncryptionOptions> encryptionOptions,
         StoragePipelineBuilder pipeline,
         IResumableSessionStore sessionStore,
-        IOptions<ResumableUploadOptions> resumableOptions)
-        : base(logger, resilienceOptions, encryptionOptions, pipeline)
+        IOptions<ResumableUploadOptions> resumableOptions,
+        Func<string, HttpClient> httpClientFactory)
+        : base(logger, resilienceOptions, encryptionOptions, pipeline, httpClientFactory)
     {
         _httpClient = httpClient;
         _options = options.Value;
@@ -517,8 +518,13 @@ public sealed class SupabaseStorageProvider : BaseStorageProvider, IPresignedUrl
             var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, tusUploadUrl);
             deleteRequest.Headers.TryAddWithoutValidation("Tus-Resumable", "1.0.0");
 
-            // Best-effort DELETE — ignore failures (session may have already expired at the server)
-            try { await _httpClient.SendAsync(deleteRequest, cancellationToken); } catch { /* ignore */ }
+            // Best-effort DELETE — log but do not throw (session may have already expired at the server)
+            try { await _httpClient.SendAsync(deleteRequest, cancellationToken); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to delete Supabase session {UploadId}", uploadId);
+            }
 
             await _sessionStore.DeleteAsync(uploadId, cancellationToken);
             Logger.LogInformation("[Supabase] Aborted TUS upload session {UploadId}", uploadId);

@@ -174,7 +174,13 @@ app.MapGet("/files/metadata", async (string path, IServiceProvider sp) =>
 {
     var storage = GetProvider(sp);
     var result = await storage.GetMetadataAsync(path);
-    return result.IsSuccess ? Results.Ok(result.Value) : Results.NotFound(result.ErrorMessage);
+    if (!result.IsSuccess)
+        return Results.NotFound(result.ErrorMessage);
+
+    var publicMetadata = result.Value!.CustomMetadata
+        .Where(kvp => !kvp.Key.StartsWith("x-vali-", StringComparison.OrdinalIgnoreCase))
+        .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+    return Results.Ok(publicMetadata);
 })
 .RequireAuthorization();
 

@@ -34,8 +34,9 @@ public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadPr
         StoragePipelineBuilder pipeline,
         IResumableSessionStore sessionStore,
         IOptions<ResumableUploadOptions> resumableOptions,
-        GCPResumableBuffer buffer)
-        : base(logger, resilienceOptions, encryptionOptions, pipeline)
+        GCPResumableBuffer buffer,
+        Func<string, HttpClient> httpClientFactory)
+        : base(logger, resilienceOptions, encryptionOptions, pipeline, httpClientFactory)
     {
         _storageClient = storageClient;
         _options = options.Value;

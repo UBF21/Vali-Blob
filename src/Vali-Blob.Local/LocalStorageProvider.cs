@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -12,6 +13,7 @@ using ValiBlob.Core.Pipeline;
 using ValiBlob.Core.Providers;
 using ValiBlob.Core.Resumable;
 using ValiBlob.Core.Telemetry;
+using ValiBlob.Core.Exceptions;
 using ValiBlob.Local.Options;
 
 namespace ValiBlob.Local;
@@ -27,8 +29,9 @@ public sealed class LocalStorageProvider : BaseStorageProvider, IResumableUpload
         IOptions<LocalStorageOptions> options,
         IOptions<ResilienceOptions> resilienceOptions,
         IOptions<EncryptionOptions> encryptionOptions,
-        StoragePipelineBuilder pipeline)
-        : base(logger, resilienceOptions, encryptionOptions, pipeline)
+        StoragePipelineBuilder pipeline,
+        Func<string, HttpClient> httpClientFactory)
+        : base(logger, resilienceOptions, encryptionOptions, pipeline, httpClientFactory)
     {
         _options = options.Value;
 
@@ -86,8 +89,17 @@ public sealed class LocalStorageProvider : BaseStorageProvider, IResumableUpload
         string eTag;
         using (var hashFs = new FileStream(resolvedPath, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
+#if NET5_0_OR_GREATER
+            var buffer = new byte[81920];
+            using var ms = new MemoryStream();
+            int read;
+            while ((read = await hashFs.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+                await ms.WriteAsync(buffer, 0, read, cancellationToken);
+            eTag = Convert.ToBase64String(MD5.HashData(ms.ToArray()));
+#else
             using var md5 = MD5.Create();
             eTag = Convert.ToBase64String(md5.ComputeHash(hashFs));
+#endif
         }
 
         // Save metadata sidecar if ContentType or Metadata is provided
@@ -390,6 +402,12 @@ public sealed class LocalStorageProvider : BaseStorageProvider, IResumableUpload
             var normalized = prefix.Replace('/', Path.DirectorySeparatorChar).TrimStart(Path.DirectorySeparatorChar);
             var folderPath = Path.GetFullPath(Path.Combine(basePath, normalized));
 
+            if (!folderPath.StartsWith(basePath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(folderPath, basePath, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new StorageValidationException(new[] { $"Path traversal detected in prefix: '{prefix}'" });
+            }
+
             if (Directory.Exists(folderPath))
                 Directory.Delete(folderPath, recursive: true);
 
@@ -508,6 +526,7 @@ public sealed class LocalStorageProvider : BaseStorageProvider, IResumableUpload
         ResumableChunkRequest request,
         CancellationToken cancellationToken = default)
     {
+        ValidateUploadId(request.UploadId);
         using var activity = StorageTelemetry.StartActivity("resumable.chunk", ProviderName, request.UploadId);
 
         var sessionDir = GetSessionDir(request.UploadId);
@@ -617,6 +636,7 @@ public sealed class LocalStorageProvider : BaseStorageProvider, IResumableUpload
         string uploadId,
         CancellationToken cancellationToken = default)
     {
+        ValidateUploadId(uploadId);
         var sessionDir = GetSessionDir(uploadId);
         if (!Directory.Exists(sessionDir))
             return Task.FromResult(StorageResult<ResumableUploadStatus>.Failure(
@@ -643,6 +663,7 @@ public sealed class LocalStorageProvider : BaseStorageProvider, IResumableUpload
         string uploadId,
         CancellationToken cancellationToken = default)
     {
+        ValidateUploadId(uploadId);
         using var activity = StorageTelemetry.StartActivity("resumable.complete", ProviderName, uploadId);
 
         var sessionDir = GetSessionDir(uploadId);
@@ -700,8 +721,17 @@ public sealed class LocalStorageProvider : BaseStorageProvider, IResumableUpload
         string eTag;
         using (var hashFs = new FileStream(resolvedPath, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
+#if NET5_0_OR_GREATER
+            var buffer = new byte[81920];
+            using var ms = new MemoryStream();
+            int read;
+            while ((read = await hashFs.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+                await ms.WriteAsync(buffer, 0, read, cancellationToken);
+            eTag = Convert.ToBase64String(MD5.HashData(ms.ToArray()));
+#else
             using var md5 = MD5.Create();
             eTag = Convert.ToBase64String(md5.ComputeHash(hashFs));
+#endif
         }
 
         var info = new FileInfo(resolvedPath);
@@ -736,6 +766,7 @@ public sealed class LocalStorageProvider : BaseStorageProvider, IResumableUpload
         string uploadId,
         CancellationToken cancellationToken = default)
     {
+        ValidateUploadId(uploadId);
         using var activity = StorageTelemetry.StartActivity("resumable.abort", ProviderName, uploadId);
 
         var sessionDir = GetSessionDir(uploadId);
@@ -749,6 +780,12 @@ public sealed class LocalStorageProvider : BaseStorageProvider, IResumableUpload
     }
 
     // ─── Resumable helpers ────────────────────────────────────────────────────
+
+    private static void ValidateUploadId(string uploadId)
+    {
+        if (!Guid.TryParse(uploadId, out _))
+            throw new StorageValidationException(new[] { $"Invalid uploadId format: '{uploadId}'" });
+    }
 
     private string GetSessionDir(string uploadId)
     {

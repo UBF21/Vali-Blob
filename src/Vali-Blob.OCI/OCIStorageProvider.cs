@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Oci.Common.Auth;
@@ -31,8 +32,9 @@ public sealed class OCIStorageProvider : BaseStorageProvider, IResumableUploadPr
         IOptions<EncryptionOptions> encryptionOptions,
         StoragePipelineBuilder pipeline,
         IResumableSessionStore sessionStore,
-        IOptions<ResumableUploadOptions> resumableOptions)
-        : base(logger, resilienceOptions, encryptionOptions, pipeline)
+        IOptions<ResumableUploadOptions> resumableOptions,
+        Func<string, HttpClient> httpClientFactory)
+        : base(logger, resilienceOptions, encryptionOptions, pipeline, httpClientFactory)
     {
         _client = client;
         _options = options.Value;
