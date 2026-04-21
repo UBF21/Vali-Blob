@@ -6,6 +6,7 @@
 ![NuGet](https://img.shields.io/badge/nuget-1.0.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![.NET](https://img.shields.io/badge/.NET-6%20%7C%207%20%7C%208%20%7C%209%20%7C%20standard2.0%2F2.1-purple)
+[![codecov](https://codecov.io/gh/YOUR_ORG/Vali-Blob/branch/main/graph/badge.svg)](https://codecov.io/gh/YOUR_ORG/Vali-Blob)
 
 ---
 

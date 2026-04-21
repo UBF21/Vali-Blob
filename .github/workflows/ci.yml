@@ -8,21 +8,20 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        dotnet-version: ["6.0", "7.0", "8.0", "9.0"]
 
     steps:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
-    - name: Setup NET SDK
+    - name: Setup .NET SDK
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: ${{ matrix.dotnet-version }}
+        dotnet-version: |
+          8.0.x
+          9.0.x
 
     - name: Restore dependencies
       run: dotnet restore
@@ -30,21 +29,56 @@ jobs:
     - name: Build solution
       run: dotnet build --no-restore --configuration Release
 
-    - name: Run tests
-      run: dotnet test --no-build --verbosity normal --configuration Release
+    - name: Run unit tests with coverage
+      run: |
+        dotnet test tests/Vali-Blob.Core.Tests/ \
+          --no-build \
+          --configuration Release \
+          --settings coverlet.runsettings \
+          --collect:"XPlat Code Coverage" \
+          --results-directory ./coverage \
+          --verbosity normal
+
+    - name: Install reportgenerator tool
+      run: dotnet tool install --global dotnet-reportgenerator-globaltool
+
+    - name: Generate coverage report
+      run: |
+        reportgenerator \
+          -reports:"coverage/**/coverage.cobertura.xml" \
+          -targetdir:"coverage/report" \
+          -reporttypes:"HtmlInline_AzurePipelines;Cobertura;TextSummary"
+
+    - name: Print coverage summary
+      run: cat coverage/report/Summary.txt
+
+    - name: Upload coverage report artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: coverage/report/
+        retention-days: 14
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        files: coverage/**/coverage.cobertura.xml
+        fail_ci_if_error: false
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   publish:
-    needs: build
+    needs: build-and-test
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Setup NET SDK
+    - name: Setup .NET SDK
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: "8.0"
+        dotnet-version: "9.0.x"
 
     - name: Restore dependencies
       run: dotnet restore
