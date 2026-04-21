@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using Azure;
@@ -35,8 +36,9 @@ public sealed class AzureBlobProvider : BaseStorageProvider, IPresignedUrlProvid
         IOptions<EncryptionOptions> encryptionOptions,
         StoragePipelineBuilder pipeline,
         IResumableSessionStore sessionStore,
-        IOptions<ResumableUploadOptions> resumableOptions)
-        : base(logger, resilienceOptions, encryptionOptions, pipeline)
+        IOptions<ResumableUploadOptions> resumableOptions,
+        Func<string, HttpClient> httpClientFactory)
+        : base(logger, resilienceOptions, encryptionOptions, pipeline, httpClientFactory)
     {
         _serviceClient = serviceClient;
         _options = options.Value;
@@ -190,6 +192,54 @@ public sealed class AzureBlobProvider : BaseStorageProvider, IPresignedUrlProvid
         }
 
         return StorageResult<IReadOnlyList<FileEntry>>.Success(entries.AsReadOnly());
+    }
+
+    public override async Task<StorageResult<BatchDeleteResult>> DeleteManyAsync(
+        IEnumerable<StoragePath> paths,
+        CancellationToken cancellationToken = default)
+    {
+        var pathList = new List<StoragePath>(paths);
+        if (pathList.Count == 0)
+            return StorageResult<BatchDeleteResult>.Success(new BatchDeleteResult
+            {
+                TotalRequested = 0,
+                Deleted = 0,
+                Failed = 0
+            });
+
+        var errors = new System.Collections.Concurrent.ConcurrentBag<BatchDeleteError>();
+        var deleted = 0;
+        var container = GetContainer();
+
+        using var semaphore = new SemaphoreSlim(32);
+        var tasks = pathList.Select(async path =>
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                await container.GetBlobClient(path).DeleteIfExistsAsync(cancellationToken: cancellationToken);
+                Interlocked.Increment(ref deleted);
+            }
+            catch (Exception ex)
+            {
+                errors.Add(new BatchDeleteError { Path = path, Reason = ex.Message });
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+
+        var errorList = errors.ToList();
+        return StorageResult<BatchDeleteResult>.Success(new BatchDeleteResult
+        {
+            TotalRequested = pathList.Count,
+            Deleted = deleted,
+            Failed = errorList.Count,
+            Errors = errorList.AsReadOnly()
+        });
     }
 
     // ─── IResumableUploadProvider ───────────────────────────────────────────

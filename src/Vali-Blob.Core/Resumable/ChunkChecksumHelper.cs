@@ -12,8 +12,12 @@ public static class ChunkChecksumHelper
     /// </summary>
     public static string ComputeMd5Base64(byte[] data)
     {
+#if NET5_0_OR_GREATER
+        return Convert.ToBase64String(MD5.HashData(data));
+#else
         using var md5 = MD5.Create();
         return Convert.ToBase64String(md5.ComputeHash(data));
+#endif
     }
 
     /// <summary>

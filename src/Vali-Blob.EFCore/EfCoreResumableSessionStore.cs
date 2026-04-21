@@ -87,18 +87,18 @@ public sealed class EfCoreResumableSessionStore : IResumableSessionStore
 
         try
         {
-            var existing = await _dbContext.ResumableSessions
+            var entity = await _dbContext.ResumableSessions
                 .FindAsync(new object[] { session.UploadId }, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (existing is null)
+            if (entity is null)
             {
                 _dbContext.ResumableSessions.Add(MapToEntity(session));
             }
             else
             {
-                ApplyToEntity(session, existing);
-                _dbContext.ResumableSessions.Update(existing);
+                ApplyToEntity(session, entity);
+                _dbContext.ResumableSessions.Update(entity);
             }
 
             await _dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);

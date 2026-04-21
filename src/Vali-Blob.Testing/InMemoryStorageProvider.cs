@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -29,8 +30,9 @@ public sealed class InMemoryStorageProvider : BaseStorageProvider, IResumableUpl
         IOptions<ResilienceOptions> resilienceOptions,
         IOptions<EncryptionOptions> encryptionOptions,
         StoragePipelineBuilder pipeline,
-        IOptions<ResumableUploadOptions> resumableOptions)
-        : base(logger, resilienceOptions, encryptionOptions, pipeline)
+        IOptions<ResumableUploadOptions> resumableOptions,
+        Func<string, HttpClient> httpClientFactory)
+        : base(logger, resilienceOptions, encryptionOptions, pipeline, httpClientFactory)
     {
         _resumableOptions = resumableOptions.Value;
     }
@@ -451,8 +453,12 @@ public sealed class InMemoryStorageProvider : BaseStorageProvider, IResumableUpl
 
     private static string ComputeETag(byte[] bytes)
     {
+#if NET5_0_OR_GREATER
+        return Convert.ToBase64String(System.Security.Cryptography.MD5.HashData(bytes));
+#else
         using var md5 = System.Security.Cryptography.MD5.Create();
         return Convert.ToBase64String(md5.ComputeHash(bytes));
+#endif
     }
 
     private sealed record StoredFile(

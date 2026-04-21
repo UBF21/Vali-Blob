@@ -21,8 +21,8 @@ public sealed class ValidationMiddleware : IStorageMiddleware
         var request = context.Request;
         var errors = new List<string>();
 
-        // Path traversal protection
-        var pathString = request.Path.ToString();
+        // Path traversal protection — decode before checking so %2e%2e%2f bypasses are caught
+        var pathString = Uri.UnescapeDataString(request.Path.ToString());
         if (pathString.Contains(".."))
             errors.Add("Path contains invalid traversal sequences ('..').");
 

@@ -121,6 +121,8 @@ public sealed class ValiStorageBuilder
         var opts = new DeduplicationOptions();
         configure?.Invoke(opts);
         Services.AddSingleton(opts);
+        // Default in-memory index; replace with a distributed implementation (e.g. Redis) via TryAddSingleton before calling WithDeduplication.
+        Services.TryAddSingleton<IDeduplicationHashIndex, InMemoryDeduplicationHashIndex>();
         Services.TryAddEnumerable(ServiceDescriptor.Transient<IStorageMiddleware, DeduplicationMiddleware>());
         return this;
     }

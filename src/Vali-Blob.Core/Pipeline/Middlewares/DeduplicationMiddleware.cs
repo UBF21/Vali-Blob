@@ -9,11 +9,16 @@ public sealed class DeduplicationMiddleware : IStorageMiddleware
 {
     private readonly IStorageProvider _provider;
     private readonly DeduplicationOptions _options;
+    private readonly IDeduplicationHashIndex _hashIndex;
 
-    public DeduplicationMiddleware(IStorageProvider provider, DeduplicationOptions options)
+    public DeduplicationMiddleware(
+        IStorageProvider provider,
+        DeduplicationOptions options,
+        IDeduplicationHashIndex hashIndex)
     {
         _provider = provider;
         _options = options;
+        _hashIndex = hashIndex;
     }
 
     public async Task InvokeAsync(StoragePipelineContext context, StorageMiddlewareDelegate next)
@@ -31,7 +36,7 @@ public sealed class DeduplicationMiddleware : IStorageMiddleware
 
         context.Items[PipelineContextKeys.DeduplicationHash] = hash;
 
-        // Stamp the hash in metadata for future lookups
+        // Stamp the hash in metadata for future lookups (and for external providers)
         var metadata = new Dictionary<string, string>(
             context.Request.Metadata ?? new Dictionary<string, string>())
         {
@@ -41,75 +46,66 @@ public sealed class DeduplicationMiddleware : IStorageMiddleware
 
         if (_options.CheckBeforeUpload)
         {
-            var existingPath = await FindByHashAsync(hash, context.CancellationToken).ConfigureAwait(false);
+            // O(1) index lookup — replaces the previous O(n) GetMetadataAsync loop
+            var existingPath = await _hashIndex.FindPathByHashAsync(hash, context.CancellationToken).ConfigureAwait(false);
             if (existingPath is not null)
             {
                 context.Items[PipelineContextKeys.DeduplicationHash] = hash;
                 context.Items[PipelineContextKeys.DeduplicationIsDuplicate] = true;
                 context.IsCancelled = true;
-                context.CancellationReason = $"Duplicate file detected. Existing path: {existingPath}";
+                context.CancellationReason = "Duplicate file detected.";
                 return;
             }
         }
 
         await next(context);
+
+        // After a successful upload, index the hash so future uploads hit the O(1) path.
+        // The request path is the canonical path; conflict-resolution renames are stored in Items if applicable.
+        if (!context.IsCancelled)
+        {
+            var uploadedPath = context.Items.TryGetValue(PipelineContextKeys.ConflictResolutionPath, out var resolved)
+                ? resolved?.ToString() ?? context.Request.Path.ToString()
+                : context.Request.Path.ToString();
+
+            await _hashIndex.IndexAsync(hash, uploadedPath, context.CancellationToken).ConfigureAwait(false);
+        }
     }
 
     private static async Task<string> ComputeSha256Async(Stream stream, CancellationToken cancellationToken = default)
     {
-        using var sha256 = SHA256.Create();
         byte[] hashBytes;
 
         if (stream.CanSeek)
         {
             var position = stream.Position;
-            hashBytes = await ComputeHashAsync(sha256, stream, cancellationToken).ConfigureAwait(false);
+            hashBytes = await ComputeHashAsync(stream, cancellationToken).ConfigureAwait(false);
             stream.Seek(position, SeekOrigin.Begin);
         }
         else
         {
-            hashBytes = await ComputeHashAsync(sha256, stream, cancellationToken).ConfigureAwait(false);
+            hashBytes = await ComputeHashAsync(stream, cancellationToken).ConfigureAwait(false);
         }
 
         return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
     }
 
-    private static async Task<byte[]> ComputeHashAsync(HashAlgorithm algorithm, Stream stream, CancellationToken cancellationToken = default)
+    private static async Task<byte[]> ComputeHashAsync(Stream stream, CancellationToken cancellationToken = default)
     {
+#if NET5_0_OR_GREATER
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, 81920, cancellationToken).ConfigureAwait(false);
+        return SHA256.HashData(ms.ToArray());
+#else
+        using var sha256 = SHA256.Create();
         var buffer = new byte[81920];
         int read;
         while ((read = await stream.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
         {
-            algorithm.TransformBlock(buffer, 0, read, null, 0);
+            sha256.TransformBlock(buffer, 0, read, null, 0);
         }
-        algorithm.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
-        return algorithm.Hash!;
-    }
-
-    private async Task<string?> FindByHashAsync(string hash, CancellationToken ct)
-    {
-        var listResult = await _provider.ListFilesAsync(prefix: null, options: null, cancellationToken: ct)
-            .ConfigureAwait(false);
-
-        if (!listResult.IsSuccess || listResult.Value is null)
-            return null;
-
-        // We can't read metadata of all files efficiently without N+1 calls.
-        // As a best-effort prefix scan, we look through the listed files' metadata.
-        foreach (var entry in listResult.Value)
-        {
-            var metaResult = await _provider.GetMetadataAsync(entry.Path, ct).ConfigureAwait(false);
-            if (!metaResult.IsSuccess || metaResult.Value is null)
-                continue;
-
-            if (metaResult.Value.CustomMetadata is not null &&
-                metaResult.Value.CustomMetadata.TryGetValue(_options.MetadataHashKey, out var storedHash) &&
-                string.Equals(storedHash, hash, StringComparison.OrdinalIgnoreCase))
-            {
-                return entry.Path;
-            }
-        }
-
-        return null;
+        sha256.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        return sha256.Hash!;
+#endif
     }
 }

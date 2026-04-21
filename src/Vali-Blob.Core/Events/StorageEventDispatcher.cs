@@ -13,31 +13,30 @@ public sealed class StorageEventDispatcher : IStorageEventDispatcher
         _logger = logger;
     }
 
-    public async Task DispatchUploadCompletedAsync(StorageEventContext context, CancellationToken cancellationToken = default)
-        => await DispatchAsync(h => h.OnUploadCompletedAsync(context, cancellationToken), nameof(IStorageEventHandler.OnUploadCompletedAsync));
+    public Task DispatchUploadCompletedAsync(StorageEventContext context, CancellationToken cancellationToken = default)
+        => DispatchAsync(h => h.OnUploadCompletedAsync(context, cancellationToken), nameof(IStorageEventHandler.OnUploadCompletedAsync));
 
-    public async Task DispatchUploadFailedAsync(StorageEventContext context, CancellationToken cancellationToken = default)
-        => await DispatchAsync(h => h.OnUploadFailedAsync(context, cancellationToken), nameof(IStorageEventHandler.OnUploadFailedAsync));
+    public Task DispatchUploadFailedAsync(StorageEventContext context, CancellationToken cancellationToken = default)
+        => DispatchAsync(h => h.OnUploadFailedAsync(context, cancellationToken), nameof(IStorageEventHandler.OnUploadFailedAsync));
 
-    public async Task DispatchDownloadCompletedAsync(StorageEventContext context, CancellationToken cancellationToken = default)
-        => await DispatchAsync(h => h.OnDownloadCompletedAsync(context, cancellationToken), nameof(IStorageEventHandler.OnDownloadCompletedAsync));
+    public Task DispatchDownloadCompletedAsync(StorageEventContext context, CancellationToken cancellationToken = default)
+        => DispatchAsync(h => h.OnDownloadCompletedAsync(context, cancellationToken), nameof(IStorageEventHandler.OnDownloadCompletedAsync));
 
-    public async Task DispatchDeleteCompletedAsync(StorageEventContext context, CancellationToken cancellationToken = default)
-        => await DispatchAsync(h => h.OnDeleteCompletedAsync(context, cancellationToken), nameof(IStorageEventHandler.OnDeleteCompletedAsync));
+    public Task DispatchDeleteCompletedAsync(StorageEventContext context, CancellationToken cancellationToken = default)
+        => DispatchAsync(h => h.OnDeleteCompletedAsync(context, cancellationToken), nameof(IStorageEventHandler.OnDeleteCompletedAsync));
 
-    private async Task DispatchAsync(Func<IStorageEventHandler, Task> dispatch, string eventName)
+    private Task DispatchAsync(Func<IStorageEventHandler, Task> dispatch, string eventName)
+        => Task.WhenAll(_handlers.Select(h => InvokeHandlerAsync(h, dispatch, eventName)));
+
+    private async Task InvokeHandlerAsync(IStorageEventHandler handler, Func<IStorageEventHandler, Task> dispatch, string eventName)
     {
-        foreach (var handler in _handlers)
+        try
         {
-            try
-            {
-                await dispatch(handler);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Event handler {Handler} threw on {Event}", handler.GetType().Name, eventName);
-                // Never let event handler failures propagate — they are fire-and-observe
-            }
+            await dispatch(handler);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Event handler {Handler} threw on {Event}", handler.GetType().Name, eventName);
         }
     }
 }

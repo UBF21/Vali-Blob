@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using Amazon.S3;
 using Amazon.S3.Model;
 using Amazon.S3.Transfer;
@@ -30,8 +31,9 @@ public sealed class AWSS3Provider : BaseStorageProvider, IPresignedUrlProvider, 
         IOptions<EncryptionOptions> encryptionOptions,
         StoragePipelineBuilder pipeline,
         IResumableSessionStore sessionStore,
-        IOptions<ResumableUploadOptions> resumableOptions)
-        : base(logger, resilienceOptions, encryptionOptions, pipeline)
+        IOptions<ResumableUploadOptions> resumableOptions,
+        Func<string, HttpClient> httpClientFactory)
+        : base(logger, resilienceOptions, encryptionOptions, pipeline, httpClientFactory)
     {
         _s3Client = s3Client;
         _options = options.Value;

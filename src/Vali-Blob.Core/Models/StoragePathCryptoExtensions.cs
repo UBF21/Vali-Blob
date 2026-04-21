@@ -16,8 +16,12 @@ public static class StoragePathCryptoExtensions
     /// </summary>
     public static StoragePath WithHashSuffix(this StoragePath path, string content)
     {
+#if NET5_0_OR_GREATER
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(content));
+#else
         using var sha = SHA256.Create();
         var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(content));
+#endif
         var shortHash = BitConverter.ToString(hash, 0, 4).Replace("-", "").ToLowerInvariant();
 
         var pathStr = path.ToString();

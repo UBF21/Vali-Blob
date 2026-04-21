@@ -25,7 +25,7 @@ public sealed class EncryptionMiddleware : IStorageMiddleware
             return;
         }
 
-        var (encryptedStream, iv) = await EncryptAsync(context.Request.Content, _options.Key);
+        var (encryptedStream, iv) = Encrypt(context.Request.Content, _options.Key);
 
         var metadata = new Dictionary<string, string>(
             context.Request.Metadata ?? new Dictionary<string, string>())
@@ -39,7 +39,7 @@ public sealed class EncryptionMiddleware : IStorageMiddleware
         await next(context);
     }
 
-    private static async Task<(Stream encrypted, byte[] iv)> EncryptAsync(Stream input, byte[]? key)
+    private static (Stream encrypted, byte[] iv) Encrypt(Stream input, byte[]? key)
     {
         if (key is null || key.Length == 0)
             throw new InvalidOperationException("EncryptionOptions.Key must be set for client-side encryption.");
@@ -52,16 +52,12 @@ public sealed class EncryptionMiddleware : IStorageMiddleware
 
         var iv = aes.IV;
 
-        byte[] encryptedBytes;
-        using (var outputStream = new MemoryStream())
-        {
-            using (var cryptoStream = new CryptoStream(outputStream, aes.CreateEncryptor(), CryptoStreamMode.Write))
-            {
-                await input.CopyToAsync(cryptoStream);
-            }
-            encryptedBytes = outputStream.ToArray();
-        }
+        // CreateEncryptor() copies key material internally — aes can be disposed safely here.
+        // CryptoStreamMode.Read wraps input and encrypts on-the-fly as the caller reads.
+        // No intermediate buffer — memory footprint is O(chunk) instead of O(file size).
+        var encryptor = aes.CreateEncryptor();
+        var cryptoStream = new CryptoStream(input, encryptor, CryptoStreamMode.Read);
 
-        return (new MemoryStream(encryptedBytes), iv);
+        return (cryptoStream, iv);
     }
 }

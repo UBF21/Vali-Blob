@@ -20,7 +20,7 @@ public sealed class CompressionMiddleware : IStorageMiddleware
         {
             var compressedStream = new MemoryStream();
             // GZipStream does not implement IAsyncDisposable in netstandard2.0 — use sync using
-            using (var gzip = new GZipStream(compressedStream, CompressionLevel.Optimal, leaveOpen: true))
+            using (var gzip = new GZipStream(compressedStream, CompressionLevel.Fastest, leaveOpen: true))
             {
                 await context.Request.Content.CopyToAsync(gzip);
             }

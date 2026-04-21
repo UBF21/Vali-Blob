@@ -79,16 +79,9 @@ internal class DownloadTransformPipeline
         aes.Mode = CipherMode.CBC;
         aes.Padding = PaddingMode.PKCS7;
 
-        // Read entire encrypted content into memory first
-        byte[] encryptedBytes;
-        using (var buffer = new MemoryStream())
-        {
-            await encryptedStream.CopyToAsync(buffer).ConfigureAwait(false);
-            encryptedBytes = buffer.ToArray();
-        }
-
-        using var encryptedMs = new MemoryStream(encryptedBytes);
-        using var cryptoStream = new CryptoStream(encryptedMs, aes.CreateDecryptor(), CryptoStreamMode.Read);
+        // CryptoStreamMode.Read wraps the source stream directly — no copy into an intermediate buffer.
+        // Single output MemoryStream holds only the decrypted plaintext (1x file size instead of 3x).
+        using var cryptoStream = new CryptoStream(encryptedStream, aes.CreateDecryptor(), CryptoStreamMode.Read);
         var output = new MemoryStream();
         await cryptoStream.CopyToAsync(output).ConfigureAwait(false);
         output.Position = 0;
