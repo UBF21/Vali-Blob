@@ -1,28 +1,26 @@
-using System.Collections.Generic;
-using System.Diagnostics;
 using System.Net.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Oci.Common.Auth;
 using Oci.ObjectstorageService;
-using Oci.ObjectstorageService.Requests;
-using Oci.ObjectstorageService.Models;
 using ValiBlob.Core.Abstractions;
 using ValiBlob.Core.Models;
 using ValiBlob.Core.Options;
 using ValiBlob.Core.Pipeline;
 using ValiBlob.Core.Providers;
 using ValiBlob.Core.Resumable;
-using ValiBlob.Core.Telemetry;
 
 namespace ValiBlob.OCI;
 
+/// <summary>
+/// Oracle Cloud Infrastructure (OCI) Object Storage provider implementation with resumable upload and presigned URL support.
+/// </summary>
 public sealed class OCIStorageProvider : BaseStorageProvider, IResumableUploadProvider, IPresignedUrlProvider
 {
     private readonly ObjectStorageClient _client;
     private readonly OCIStorageOptions _options;
     private readonly IResumableSessionStore _sessionStore;
-    private readonly ResumableUploadOptions _resumableOptions;
+    private readonly OciResumableUploadHandler _resumableHandler;
+    private readonly OciPresignedUrlHandler _presignedHandler;
 
     public OCIStorageProvider(
         ObjectStorageClient client,
@@ -39,31 +37,33 @@ public sealed class OCIStorageProvider : BaseStorageProvider, IResumableUploadPr
         _client = client;
         _options = options.Value;
         _sessionStore = sessionStore;
-        _resumableOptions = resumableOptions.Value;
+
+        _resumableHandler = new OciResumableUploadHandler(
+            client, _options, sessionStore, resumableOptions.Value, logger);
+
+        _presignedHandler = new OciPresignedUrlHandler(client, _options, logger);
     }
 
-    public override string ProviderName => "OCI";
+    /// <summary>
+    /// Gets the provider name identifier.
+    /// </summary>
+    public override string ProviderName => nameof(StorageProviderType.OCI);
 
     private string GetServiceBaseUrl() =>
         _options.ServiceUrl ?? $"https://objectstorage.{_options.Region}.oraclecloud.com";
 
+    // ─── Core overrides ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Uploads content to OCI Object Storage.
+    /// </summary>
     protected override async Task<StorageResult<UploadResult>> UploadCoreAsync(
         UploadRequest request,
         IProgress<UploadProgress>? progress,
         CancellationToken cancellationToken)
     {
         var bucket = ResolveBucket(request.BucketOverride, _options.Bucket);
-        var putRequest = new PutObjectRequest
-        {
-            NamespaceName = _options.Namespace,
-            BucketName = bucket,
-            ObjectName = request.Path,
-            PutObjectBody = request.Content,
-            ContentType = request.ContentType,
-            ContentLength = request.ContentLength
-        };
-
-        var response = await _client.PutObject(putRequest);
+        var response = await _client.PutObject(OciObjectRequestBuilder.BuildPut(_options.Namespace, bucket, request));
 
         return StorageResult<UploadResult>.Success(new UploadResult
         {
@@ -73,51 +73,34 @@ public sealed class OCIStorageProvider : BaseStorageProvider, IResumableUploadPr
         });
     }
 
+    /// <summary>
+    /// Downloads content from OCI Object Storage.
+    /// </summary>
     protected override async Task<StorageResult<Stream>> DownloadCoreAsync(
         DownloadRequest request, CancellationToken cancellationToken)
     {
         var bucket = ResolveBucket(request.BucketOverride, _options.Bucket);
-        var getRequest = new GetObjectRequest
-        {
-            NamespaceName = _options.Namespace,
-            BucketName = bucket,
-            ObjectName = request.Path
-        };
-
-        if (request.Range is not null)
-        {
-            getRequest.Range = new Oci.Common.Model.Range
-            {
-                StartByte = request.Range.From,
-                EndByte = request.Range.To
-            };
-        }
-
-        var response = await _client.GetObject(getRequest);
+        var response = await _client.GetObject(OciObjectRequestBuilder.BuildGet(_options.Namespace, bucket, request));
         return StorageResult<Stream>.Success(response.InputStream);
     }
 
+    /// <summary>
+    /// Deletes an object from OCI Object Storage.
+    /// </summary>
     protected override async Task<StorageResult> DeleteCoreAsync(string path, CancellationToken cancellationToken)
     {
-        await _client.DeleteObject(new DeleteObjectRequest
-        {
-            NamespaceName = _options.Namespace,
-            BucketName = _options.Bucket,
-            ObjectName = path
-        });
+        await _client.DeleteObject(OciObjectRequestBuilder.BuildDelete(_options.Namespace, _options.Bucket, path));
         return StorageResult.Success();
     }
 
+    /// <summary>
+    /// Checks if an object exists in OCI Object Storage.
+    /// </summary>
     protected override async Task<StorageResult<bool>> ExistsCoreAsync(string path, CancellationToken cancellationToken)
     {
         try
         {
-            await _client.HeadObject(new HeadObjectRequest
-            {
-                NamespaceName = _options.Namespace,
-                BucketName = _options.Bucket,
-                ObjectName = path
-            });
+            await _client.HeadObject(OciObjectRequestBuilder.BuildHead(_options.Namespace, _options.Bucket, path));
             return StorageResult<bool>.Success(true);
         }
         catch (Oci.Common.Model.OciException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -126,6 +109,9 @@ public sealed class OCIStorageProvider : BaseStorageProvider, IResumableUploadPr
         }
     }
 
+    /// <summary>
+    /// Constructs the public URL for an object in OCI Object Storage.
+    /// </summary>
     protected override Task<StorageResult<string>> GetUrlCoreAsync(string path, CancellationToken cancellationToken)
     {
         var url = _options.CdnBaseUrl is not null
@@ -135,32 +121,25 @@ public sealed class OCIStorageProvider : BaseStorageProvider, IResumableUploadPr
         return Task.FromResult(StorageResult<string>.Success(url));
     }
 
-    protected override async Task<StorageResult> CopyCoreAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken)
+    /// <summary>
+    /// Copies an object within OCI Object Storage.
+    /// </summary>
+    protected override async Task<StorageResult> CopyCoreAsync(
+        string sourcePath, string destinationPath, CancellationToken cancellationToken)
     {
-        await _client.CopyObject(new CopyObjectRequest
-        {
-            NamespaceName = _options.Namespace,
-            BucketName = _options.Bucket,
-            CopyObjectDetails = new CopyObjectDetails
-            {
-                SourceObjectName = sourcePath,
-                DestinationBucket = _options.Bucket,
-                DestinationNamespace = _options.Namespace,
-                DestinationObjectName = destinationPath,
-                DestinationRegion = _options.Region
-            }
-        });
+        await _client.CopyObject(OciObjectRequestBuilder.BuildCopy(
+            _options.Namespace, _options.Bucket, _options.Region, sourcePath, destinationPath));
         return StorageResult.Success();
     }
 
-    protected override async Task<StorageResult<FileMetadata>> GetMetadataCoreAsync(string path, CancellationToken cancellationToken)
+    /// <summary>
+    /// Retrieves metadata for an object in OCI Object Storage.
+    /// </summary>
+    protected override async Task<StorageResult<FileMetadata>> GetMetadataCoreAsync(
+        string path, CancellationToken cancellationToken)
     {
-        var response = await _client.HeadObject(new HeadObjectRequest
-        {
-            NamespaceName = _options.Namespace,
-            BucketName = _options.Bucket,
-            ObjectName = path
-        });
+        var response = await _client.HeadObject(
+            OciObjectRequestBuilder.BuildHead(_options.Namespace, _options.Bucket, path));
 
         return StorageResult<FileMetadata>.Success(new FileMetadata
         {
@@ -172,340 +151,24 @@ public sealed class OCIStorageProvider : BaseStorageProvider, IResumableUploadPr
         });
     }
 
-    protected override Task<StorageResult> SetMetadataCoreAsync(string path, IDictionary<string, string> metadata, CancellationToken cancellationToken)
+    /// <summary>
+    /// Updates metadata for an object in OCI Object Storage (not supported; requires re-upload).
+    /// </summary>
+    protected override Task<StorageResult> SetMetadataCoreAsync(
+        string path, IDictionary<string, string> metadata, CancellationToken cancellationToken)
     {
-        // OCI requires re-upload to set metadata
         Logger.LogWarning("[OCI] SetMetadata requires re-upload in OCI Object Storage.");
         return Task.FromResult(StorageResult.Failure("OCI requires re-upload to update metadata.", StorageErrorCode.NotSupported));
     }
 
-    // ─── IResumableUploadProvider ─────────────────────────────────────────────
-
-    public async Task<StorageResult<ResumableUploadSession>> StartResumableUploadAsync(
-        ResumableUploadRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        using var activity = StorageTelemetry.StartActivity("resumable.start", ProviderName, request.Path);
-        try
-        {
-            var bucket = ResolveBucket(request.BucketOverride, _options.Bucket);
-            var createRequest = new CreateMultipartUploadRequest
-            {
-                NamespaceName = _options.Namespace,
-                BucketName = bucket,
-                CreateMultipartUploadDetails = new CreateMultipartUploadDetails
-                {
-                    Object = request.Path,
-                    ContentType = request.ContentType
-                }
-            };
-
-            var createResponse = await _client.CreateMultipartUpload(createRequest);
-            var ociUploadId = createResponse.MultipartUpload.UploadId;
-            var expiration = request.Options?.SessionExpiration ?? _resumableOptions.SessionExpiration;
-
-            var session = new ResumableUploadSession
-            {
-                UploadId = Guid.NewGuid().ToString("N"),
-                Path = request.Path,
-                BucketOverride = request.BucketOverride,
-                TotalSize = request.TotalSize,
-                BytesUploaded = 0,
-                ContentType = request.ContentType,
-                Metadata = request.Metadata,
-                ExpiresAt = DateTimeOffset.UtcNow.Add(expiration),
-                ProviderData = new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["ociUploadId"] = ociUploadId,
-                    ["ociNamespace"] = _options.Namespace,
-                    ["ociBucket"] = bucket,
-                    ["ociObjectName"] = request.Path,
-                    ["ociNextPartNum"] = "1",
-                    ["ociParts"] = string.Empty  // "partNum:eTag|..." accumulated list
-                }
-            };
-
-            await _sessionStore.SaveAsync(session, cancellationToken);
-            Logger.LogInformation("[OCI] Started multipart upload session {UploadId} for {Path}", session.UploadId, session.Path);
-            StorageTelemetry.RecordResumableStarted(ProviderName);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            return StorageResult<ResumableUploadSession>.Success(session);
-        }
-        catch (Exception ex)
-        {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            StorageTelemetry.RecordError(ProviderName, "resumable.start");
-            Logger.LogError(ex, "[OCI] Failed to start multipart upload for {Path}", request.Path);
-            return StorageResult<ResumableUploadSession>.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
-
-    public async Task<StorageResult<ChunkUploadResult>> UploadChunkAsync(
-        ResumableChunkRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        using var activity = StorageTelemetry.StartActivity("resumable.chunk", ProviderName, request.UploadId);
-        try
-        {
-            var session = await _sessionStore.GetAsync(request.UploadId, cancellationToken);
-            if (session is null)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session not found");
-                return StorageResult<ChunkUploadResult>.Failure($"Upload session '{request.UploadId}' not found or expired.", StorageErrorCode.FileNotFound);
-            }
-            if (session.IsAborted)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session aborted");
-                return StorageResult<ChunkUploadResult>.Failure("Upload session has been aborted.", StorageErrorCode.ValidationFailed);
-            }
-
-            var partNumber = int.Parse(session.ProviderData["ociNextPartNum"]);
-
-            var chunkBytes = await StreamReadHelper.ReadChunkAsync(request.Data, request.Length, cancellationToken)
-                .ConfigureAwait(false);
-
-            var chunkMd5 = ChunkChecksumHelper.ComputeMd5Base64(chunkBytes);
-
-            // Validate against caller-supplied checksum if provided
-            if (request.ExpectedMd5 is not null)
-            {
-                var error = ChunkChecksumHelper.Validate(chunkMd5, request.ExpectedMd5);
-                if (error is not null)
-                {
-                    StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-                    activity?.SetStatus(ActivityStatusCode.Error, error);
-                    return StorageResult<ChunkUploadResult>.Failure(error, StorageErrorCode.ValidationFailed);
-                }
-            }
-
-            using var chunkStream = new MemoryStream(chunkBytes);
-            var uploadPartRequest = new UploadPartRequest
-            {
-                NamespaceName = session.ProviderData["ociNamespace"],
-                BucketName = session.ProviderData["ociBucket"],
-                ObjectName = session.ProviderData["ociObjectName"],
-                UploadId = session.ProviderData["ociUploadId"],
-                UploadPartNum = partNumber,
-                UploadPartBody = chunkStream,
-                ContentLength = chunkBytes.Length,
-                ContentMD5 = _resumableOptions.EnableChecksumValidation ? chunkMd5 : null
-            };
-
-            var partResponse = await _client.UploadPart(uploadPartRequest);
-            var etag = partResponse.ETag?.Trim('"') ?? string.Empty;
-
-            var partsEntry = $"{partNumber}:{etag}";
-            var existing = session.ProviderData["ociParts"];
-            session.ProviderData["ociParts"] = string.IsNullOrEmpty(existing) ? partsEntry : $"{existing}|{partsEntry}";
-            session.ProviderData["ociNextPartNum"] = (partNumber + 1).ToString();
-            session.BytesUploaded += chunkBytes.Length;
-
-            await _sessionStore.UpdateAsync(session, cancellationToken);
-
-            StorageTelemetry.RecordResumableChunk(ProviderName, chunkBytes.Length);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-
-            var isReady = session.BytesUploaded >= session.TotalSize;
-            return StorageResult<ChunkUploadResult>.Success(new ChunkUploadResult
-            {
-                UploadId = request.UploadId,
-                BytesUploaded = session.BytesUploaded,
-                TotalSize = session.TotalSize,
-                IsReadyToComplete = isReady
-            });
-        }
-        catch (Exception ex)
-        {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-            Logger.LogError(ex, "[OCI] Chunk upload failed for session {UploadId}", request.UploadId);
-            return StorageResult<ChunkUploadResult>.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
-
-    protected override IResumableSessionStore GetSessionStore() => _sessionStore;
-
-    public async Task<StorageResult<UploadResult>> CompleteResumableUploadAsync(
-        string uploadId,
-        CancellationToken cancellationToken = default)
-    {
-        using var activity = StorageTelemetry.StartActivity("resumable.complete", ProviderName, uploadId);
-        try
-        {
-            var session = await _sessionStore.GetAsync(uploadId, cancellationToken);
-            if (session is null)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.complete");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session not found");
-                return StorageResult<UploadResult>.Failure($"Upload session '{uploadId}' not found or expired.", StorageErrorCode.FileNotFound);
-            }
-            if (session.IsAborted)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.complete");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session aborted");
-                return StorageResult<UploadResult>.Failure("Upload session has been aborted.", StorageErrorCode.ValidationFailed);
-            }
-
-            var parts = ParseOCIParts(session.ProviderData["ociParts"]);
-            var commitRequest = new CommitMultipartUploadRequest
-            {
-                NamespaceName = session.ProviderData["ociNamespace"],
-                BucketName = session.ProviderData["ociBucket"],
-                ObjectName = session.ProviderData["ociObjectName"],
-                UploadId = session.ProviderData["ociUploadId"],
-                CommitMultipartUploadDetails = new CommitMultipartUploadDetails
-                {
-                    PartsToCommit = parts
-                }
-            };
-
-            await _client.CommitMultipartUpload(commitRequest);
-            session.IsComplete = true;
-            await _sessionStore.DeleteAsync(uploadId, cancellationToken);
-
-            Logger.LogInformation("[OCI] Completed multipart upload session {UploadId} for {Path}", uploadId, session.Path);
-            StorageTelemetry.RecordResumableCompleted(ProviderName);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            return StorageResult<UploadResult>.Success(new UploadResult
-            {
-                Path = session.Path,
-                SizeBytes = session.BytesUploaded
-            });
-        }
-        catch (Exception ex)
-        {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            StorageTelemetry.RecordError(ProviderName, "resumable.complete");
-            Logger.LogError(ex, "[OCI] CompleteResumableUpload failed for session {UploadId}", uploadId);
-            return StorageResult<UploadResult>.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
-
-    public async Task<StorageResult> AbortResumableUploadAsync(
-        string uploadId,
-        CancellationToken cancellationToken = default)
-    {
-        using var activity = StorageTelemetry.StartActivity("resumable.abort", ProviderName, uploadId);
-        try
-        {
-            var session = await _sessionStore.GetAsync(uploadId, cancellationToken);
-            if (session is null)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.abort");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session not found");
-                return StorageResult.Failure($"Upload session '{uploadId}' not found or expired.", StorageErrorCode.FileNotFound);
-            }
-
-            await _client.AbortMultipartUpload(new AbortMultipartUploadRequest
-            {
-                NamespaceName = session.ProviderData["ociNamespace"],
-                BucketName = session.ProviderData["ociBucket"],
-                ObjectName = session.ProviderData["ociObjectName"],
-                UploadId = session.ProviderData["ociUploadId"]
-            });
-
-            await _sessionStore.DeleteAsync(uploadId, cancellationToken);
-            Logger.LogInformation("[OCI] Aborted multipart upload session {UploadId}", uploadId);
-            StorageTelemetry.RecordResumableAborted(ProviderName);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            return StorageResult.Success();
-        }
-        catch (Exception ex)
-        {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            StorageTelemetry.RecordError(ProviderName, "resumable.abort");
-            Logger.LogError(ex, "[OCI] AbortResumableUpload failed for session {UploadId}", uploadId);
-            return StorageResult.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
-
-    // ─── IPresignedUrlProvider (via Pre-Authenticated Requests) ──────────────
-
-    public async Task<StorageResult<string>> GetPresignedUploadUrlAsync(
-        string path, TimeSpan expiration, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var response = await _client.CreatePreauthenticatedRequest(
-                new CreatePreauthenticatedRequestRequest
-                {
-                    NamespaceName = _options.Namespace,
-                    BucketName = _options.Bucket,
-                    CreatePreauthenticatedRequestDetails = new CreatePreauthenticatedRequestDetails
-                    {
-                        Name = $"upload-{Guid.NewGuid():N}",
-                        ObjectName = path,
-                        AccessType = CreatePreauthenticatedRequestDetails.AccessTypeEnum.ObjectWrite,
-                        TimeExpires = DateTime.UtcNow.Add(expiration)
-                    }
-                });
-
-            var url = $"{GetServiceBaseUrl()}{response.PreauthenticatedRequest.AccessUri}";
-            return StorageResult<string>.Success(url);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "[OCI] GetPresignedUploadUrl failed for {Path}", path);
-            return StorageResult<string>.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
-
-    public async Task<StorageResult<string>> GetPresignedDownloadUrlAsync(
-        string path, TimeSpan expiration, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var response = await _client.CreatePreauthenticatedRequest(
-                new CreatePreauthenticatedRequestRequest
-                {
-                    NamespaceName = _options.Namespace,
-                    BucketName = _options.Bucket,
-                    CreatePreauthenticatedRequestDetails = new CreatePreauthenticatedRequestDetails
-                    {
-                        Name = $"download-{Guid.NewGuid():N}",
-                        ObjectName = path,
-                        AccessType = CreatePreauthenticatedRequestDetails.AccessTypeEnum.ObjectRead,
-                        TimeExpires = DateTime.UtcNow.Add(expiration)
-                    }
-                });
-
-            var url = $"{GetServiceBaseUrl()}{response.PreauthenticatedRequest.AccessUri}";
-            return StorageResult<string>.Success(url);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "[OCI] GetPresignedDownloadUrl failed for {Path}", path);
-            return StorageResult<string>.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
-
-    private static List<CommitMultipartUploadPartDetails> ParseOCIParts(string raw)
-    {
-        var parts = new List<CommitMultipartUploadPartDetails>();
-        if (string.IsNullOrEmpty(raw)) return parts;
-        foreach (var entry in raw.Split('|'))
-        {
-            var idx = entry.IndexOf(':');
-            if (idx < 0) continue;
-            var num = int.Parse(entry.Substring(0, idx));
-            var etag = entry.Substring(idx + 1);
-            parts.Add(new CommitMultipartUploadPartDetails { PartNum = num, Etag = etag });
-        }
-        return parts;
-    }
-
+    /// <summary>
+    /// Lists objects in OCI Object Storage with optional prefix filtering and pagination.
+    /// </summary>
     protected override async Task<StorageResult<IReadOnlyList<FileEntry>>> ListFilesCoreAsync(
         string? prefix, ListOptions? options, CancellationToken cancellationToken)
     {
-        var response = await _client.ListObjects(new ListObjectsRequest
-        {
-            NamespaceName = _options.Namespace,
-            BucketName = _options.Bucket,
-            Prefix = prefix,
-            Limit = options?.MaxResults ?? 1000
-        });
+        var response = await _client.ListObjects(
+            OciObjectRequestBuilder.BuildList(_options.Namespace, _options.Bucket, prefix, options?.MaxResults ?? 1000));
 
         var entries = response.ListObjects.Objects.Select(o => new FileEntry
         {
@@ -517,4 +180,52 @@ public sealed class OCIStorageProvider : BaseStorageProvider, IResumableUploadPr
 
         return StorageResult<IReadOnlyList<FileEntry>>.Success(entries.AsReadOnly());
     }
+
+    // ─── IResumableUploadProvider ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Starts a resumable upload session in OCI Object Storage.
+    /// </summary>
+    public Task<StorageResult<ResumableUploadSession>> StartResumableUploadAsync(
+        ResumableUploadRequest request, CancellationToken cancellationToken = default) =>
+        _resumableHandler.StartAsync(request, cancellationToken);
+
+    /// <summary>
+    /// Uploads a chunk to a resumable upload session in OCI Object Storage.
+    /// </summary>
+    public Task<StorageResult<ChunkUploadResult>> UploadChunkAsync(
+        ResumableChunkRequest request, CancellationToken cancellationToken = default) =>
+        _resumableHandler.UploadChunkAsync(request, cancellationToken);
+
+    /// <summary>
+    /// Completes a resumable upload session in OCI Object Storage.
+    /// </summary>
+    public Task<StorageResult<UploadResult>> CompleteResumableUploadAsync(
+        string uploadId, CancellationToken cancellationToken = default) =>
+        _resumableHandler.CompleteAsync(uploadId, cancellationToken);
+
+    /// <summary>
+    /// Aborts a resumable upload session in OCI Object Storage.
+    /// </summary>
+    public Task<StorageResult> AbortResumableUploadAsync(
+        string uploadId, CancellationToken cancellationToken = default) =>
+        _resumableHandler.AbortAsync(uploadId, cancellationToken);
+
+    protected override IResumableSessionStore GetSessionStore() => _sessionStore;
+
+    // ─── IPresignedUrlProvider ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Generates a presigned URL for uploading an object to OCI Object Storage.
+    /// </summary>
+    public Task<StorageResult<string>> GetPresignedUploadUrlAsync(
+        string path, TimeSpan expiration, CancellationToken cancellationToken = default) =>
+        _presignedHandler.GetPresignedUploadUrlAsync(path, expiration, GetServiceBaseUrl(), cancellationToken);
+
+    /// <summary>
+    /// Generates a presigned URL for downloading an object from OCI Object Storage.
+    /// </summary>
+    public Task<StorageResult<string>> GetPresignedDownloadUrlAsync(
+        string path, TimeSpan expiration, CancellationToken cancellationToken = default) =>
+        _presignedHandler.GetPresignedDownloadUrlAsync(path, expiration, GetServiceBaseUrl(), cancellationToken);
 }

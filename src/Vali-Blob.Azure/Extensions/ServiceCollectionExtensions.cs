@@ -5,11 +5,22 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using ValiBlob.Core.Abstractions;
 using ValiBlob.Core.DependencyInjection;
+using ValiBlob.Core.Options;
 
 namespace ValiBlob.Azure.Extensions;
 
+/// <summary>
+/// Extension methods for configuring Azure Blob Storage with ValiBlob.
+/// </summary>
 public static class ServiceCollectionExtensions
 {
+    /// <summary>
+    /// Adds Azure Blob Storage as the configured storage provider.
+    /// </summary>
+    /// <param name="builder">The ValiBlob storage builder.</param>
+    /// <param name="configure">Optional action to configure Azure Blob Storage options.</param>
+    /// <returns>The configured ValiBlob storage builder for method chaining.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when neither ConnectionString nor AccountName+AccountKey are provided.</exception>
     public static ValiStorageBuilder UseAzure(
         this ValiStorageBuilder builder,
         Action<AzureBlobOptions>? configure = null)
@@ -38,7 +49,7 @@ public static class ServiceCollectionExtensions
                 "ValiBlob Azure: provide either ConnectionString or AccountName + AccountKey.");
         });
 
-        builder.Services.AddKeyedScoped<IStorageProvider, AzureBlobProvider>("Azure");
+        builder.Services.AddKeyedScoped<IStorageProvider, AzureBlobProvider>(nameof(StorageProviderType.Azure));
 
         return builder;
     }

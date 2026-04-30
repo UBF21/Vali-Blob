@@ -6,11 +6,21 @@ using Oci.Common.Auth;
 using Oci.ObjectstorageService;
 using ValiBlob.Core.Abstractions;
 using ValiBlob.Core.DependencyInjection;
+using ValiBlob.Core.Options;
 
 namespace ValiBlob.OCI.Extensions;
 
+/// <summary>
+/// Dependency injection extensions for Oracle Cloud Infrastructure Object Storage provider.
+/// </summary>
 public static class ServiceCollectionExtensions
 {
+    /// <summary>
+    /// Registers the OCI Object Storage provider with the ValiBlob dependency injection container.
+    /// </summary>
+    /// <param name="builder">The ValiStorageBuilder instance.</param>
+    /// <param name="configure">Optional configuration action for OCIStorageOptions.</param>
+    /// <returns>The ValiStorageBuilder instance for method chaining.</returns>
     public static ValiStorageBuilder UseOCI(
         this ValiStorageBuilder builder,
         Action<OCIStorageOptions>? configure = null)
@@ -46,7 +56,7 @@ public static class ServiceCollectionExtensions
             return new ObjectStorageClient(authProvider);
         });
 
-        builder.Services.AddKeyedScoped<IStorageProvider, OCIStorageProvider>("OCI");
+        builder.Services.AddKeyedScoped<IStorageProvider, OCIStorageProvider>(nameof(StorageProviderType.OCI));
 
         return builder;
     }

@@ -16,6 +16,9 @@ using Object = Google.Apis.Storage.v1.Data.Object;
 
 namespace ValiBlob.GCP;
 
+/// <summary>
+/// Google Cloud Storage provider implementation with resumable upload and presigned URL support.
+/// </summary>
 public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadProvider, IPresignedUrlProvider
 {
     private readonly StorageClient _storageClient;
@@ -52,25 +55,21 @@ public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadPr
         // Application Default Credentials may not support signing — UrlSigner stays null in that case
     }
 
-    public override string ProviderName => "GCP";
+    /// <summary>
+    /// Gets the provider name identifier.
+    /// </summary>
+    public override string ProviderName => nameof(StorageProviderType.GCP);
 
+    /// <summary>
+    /// Uploads content to GCP using the Google Cloud Storage API.
+    /// </summary>
     protected override async Task<StorageResult<UploadResult>> UploadCoreAsync(
         UploadRequest request,
         IProgress<UploadProgress>? progress,
         CancellationToken cancellationToken)
     {
         var bucket = ResolveBucket(request.BucketOverride, _options.Bucket);
-        var uploadObject = new Object
-        {
-            Bucket = bucket,
-            Name = request.Path,
-            ContentType = request.ContentType
-        };
-
-        if (request.Metadata is not null)
-        {
-            uploadObject.Metadata = request.Metadata.ToDictionary(k => k.Key, v => v.Value);
-        }
+        var uploadObject = GcpObjectHelper.BuildUploadObject(bucket, request.Path, request.ContentType, request.Metadata);
 
         IProgress<Google.Apis.Upload.IUploadProgress>? gcpProgress = null;
         if (progress is not null)
@@ -90,6 +89,9 @@ public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadPr
         });
     }
 
+    /// <summary>
+    /// Downloads content from GCP, optionally applying range constraints.
+    /// </summary>
     protected override async Task<StorageResult<Stream>> DownloadCoreAsync(
         DownloadRequest request, CancellationToken cancellationToken)
     {
@@ -98,26 +100,24 @@ public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadPr
         await _storageClient.DownloadObjectAsync(bucket, request.Path, ms, cancellationToken: cancellationToken);
 
         if (request.Range is not null)
-        {
-            var from = request.Range.From;
-            var to = request.Range.To.HasValue ? request.Range.To.Value : ms.Length - 1;
-            var length = to - from + 1;
-            var buffer = new byte[length];
-            ms.Position = from;
-            var read = await ms.ReadAsync(buffer, 0, (int)length, cancellationToken);
-            return StorageResult<Stream>.Success(new MemoryStream(buffer, 0, read));
-        }
+            return StorageResult<Stream>.Success(await GcpObjectHelper.ApplyRangeAsync(ms, request.Range, cancellationToken));
 
         ms.Position = 0;
         return StorageResult<Stream>.Success(ms);
     }
 
+    /// <summary>
+    /// Deletes an object from GCP.
+    /// </summary>
     protected override async Task<StorageResult> DeleteCoreAsync(string path, CancellationToken cancellationToken)
     {
         await _storageClient.DeleteObjectAsync(_options.Bucket, path, cancellationToken: cancellationToken);
         return StorageResult.Success();
     }
 
+    /// <summary>
+    /// Checks if an object exists in GCP.
+    /// </summary>
     protected override async Task<StorageResult<bool>> ExistsCoreAsync(string path, CancellationToken cancellationToken)
     {
         try
@@ -131,36 +131,37 @@ public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadPr
         }
     }
 
+    /// <summary>
+    /// Constructs the public URL for an object in GCP.
+    /// </summary>
     protected override Task<StorageResult<string>> GetUrlCoreAsync(string path, CancellationToken cancellationToken)
     {
-        var url = _options.CdnBaseUrl is not null
-            ? $"{_options.CdnBaseUrl.TrimEnd('/')}/{path}"
-            : $"https://storage.googleapis.com/{_options.Bucket}/{path}";
+        var url = GcpObjectHelper.ResolvePublicUrl(_options.Bucket, _options.CdnBaseUrl, path);
 
         return Task.FromResult(StorageResult<string>.Success(url));
     }
 
+    /// <summary>
+    /// Copies an object within GCP.
+    /// </summary>
     protected override async Task<StorageResult> CopyCoreAsync(string sourcePath, string destinationPath, CancellationToken cancellationToken)
     {
         await _storageClient.CopyObjectAsync(_options.Bucket, sourcePath, _options.Bucket, destinationPath, cancellationToken: cancellationToken);
         return StorageResult.Success();
     }
 
+    /// <summary>
+    /// Retrieves metadata for an object in GCP.
+    /// </summary>
     protected override async Task<StorageResult<FileMetadata>> GetMetadataCoreAsync(string path, CancellationToken cancellationToken)
     {
         var obj = await _storageClient.GetObjectAsync(_options.Bucket, path, cancellationToken: cancellationToken);
-
-        return StorageResult<FileMetadata>.Success(new FileMetadata
-        {
-            Path = path,
-            SizeBytes = (long)(obj.Size ?? 0),
-            ContentType = obj.ContentType,
-            LastModified = obj.UpdatedDateTimeOffset,
-            ETag = obj.ETag,
-            CustomMetadata = obj.Metadata ?? new Dictionary<string, string>()
-        });
+        return StorageResult<FileMetadata>.Success(GcpObjectHelper.ToFileMetadata(path, obj));
     }
 
+    /// <summary>
+    /// Updates metadata for an object in GCP.
+    /// </summary>
     protected override async Task<StorageResult> SetMetadataCoreAsync(string path, IDictionary<string, string> metadata, CancellationToken cancellationToken)
     {
         var obj = await _storageClient.GetObjectAsync(_options.Bucket, path, cancellationToken: cancellationToken);
@@ -189,23 +190,21 @@ public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadPr
             var uploadId = Guid.NewGuid().ToString("N");
             var tempPath = _buffer.CreateSession(uploadId);
             // Pre-allocate file to TotalSize to allow random-offset writes
-            using (var fs = new FileStream(tempPath, FileMode.Open, FileAccess.Write, FileShare.None))
+            if (request.TotalSize > 0)
             {
-                if (request.TotalSize > 0)
-                    fs.SetLength(request.TotalSize);
+                using var fs = new FileStream(tempPath, FileMode.Open, FileAccess.Write, FileShare.None);
+                fs.SetLength(request.TotalSize);
             }
 
-            var expiration = request.Options?.SessionExpiration ?? _resumableOptions.SessionExpiration;
             var session = new ResumableUploadSession
             {
                 UploadId = uploadId,
                 Path = request.Path,
                 BucketOverride = request.BucketOverride,
                 TotalSize = request.TotalSize,
-                BytesUploaded = 0,
                 ContentType = request.ContentType,
                 Metadata = request.Metadata,
-                ExpiresAt = DateTimeOffset.UtcNow.Add(expiration),
+                ExpiresAt = DateTimeOffset.UtcNow.Add(request.Options?.SessionExpiration ?? _resumableOptions.SessionExpiration),
                 ProviderData = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["gcpBucket"] = ResolveBucket(request.BucketOverride, _options.Bucket),
@@ -240,47 +239,25 @@ public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadPr
         using var activity = StorageTelemetry.StartActivity("resumable.chunk", ProviderName, request.UploadId);
         try
         {
-            var session = await _sessionStore.GetAsync(request.UploadId, cancellationToken);
-            if (session is null)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session not found");
-                return StorageResult<ChunkUploadResult>.Failure($"Upload session '{request.UploadId}' not found or expired.", StorageErrorCode.FileNotFound);
-            }
-            if (session.IsAborted)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session aborted");
-                return StorageResult<ChunkUploadResult>.Failure("Upload session has been aborted.", StorageErrorCode.ValidationFailed);
-            }
+            var validation = await ValidateSessionAndBuffer<ChunkUploadResult>(request.UploadId, "resumable.chunk", activity, cancellationToken);
+            if (validation.failed is not null) return validation.failed.Value;
 
-            if (!_buffer.TryGetTempPath(request.UploadId, out var tempPath))
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-                activity?.SetStatus(ActivityStatusCode.Error, "Buffer not found");
-                return StorageResult<ChunkUploadResult>.Failure("Buffer for upload session not found. Was the process restarted?", StorageErrorCode.ProviderError);
-            }
+            var (session, tempPath) = (validation.session!, validation.tempPath!);
 
             var chunkBytes = await StreamReadHelper.ReadChunkAsync(request.Data, request.Length, cancellationToken)
                 .ConfigureAwait(false);
 
-            // Checksum validation
             if (_resumableOptions.EnableChecksumValidation || request.ExpectedMd5 is not null)
             {
-                var actualMd5 = ChunkChecksumHelper.ComputeMd5Base64(chunkBytes);
-                if (request.ExpectedMd5 is not null)
+                var checksumError = ValidateChunkChecksum(chunkBytes, request.ExpectedMd5);
+                if (checksumError is not null)
                 {
-                    var error = ChunkChecksumHelper.Validate(actualMd5, request.ExpectedMd5);
-                    if (error is not null)
-                    {
-                        StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-                        activity?.SetStatus(ActivityStatusCode.Error, error);
-                        return StorageResult<ChunkUploadResult>.Failure(error, StorageErrorCode.ValidationFailed);
-                    }
+                    StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
+                    activity?.SetStatus(ActivityStatusCode.Error, checksumError);
+                    return StorageResult<ChunkUploadResult>.Failure(checksumError, StorageErrorCode.ValidationFailed);
                 }
             }
 
-            // Write chunk at the correct offset in the temp file
             using (var fs = new FileStream(tempPath, FileMode.Open, FileAccess.Write, FileShare.None))
             {
                 fs.Seek(request.Offset, SeekOrigin.Begin);
@@ -294,13 +271,12 @@ public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadPr
             StorageTelemetry.RecordResumableChunk(ProviderName, chunkBytes.Length);
             activity?.SetStatus(ActivityStatusCode.Ok);
 
-            var isReady = session.BytesUploaded >= session.TotalSize;
             return StorageResult<ChunkUploadResult>.Success(new ChunkUploadResult
             {
                 UploadId = request.UploadId,
                 BytesUploaded = session.BytesUploaded,
                 TotalSize = session.TotalSize,
-                IsReadyToComplete = isReady
+                IsReadyToComplete = session.BytesUploaded >= session.TotalSize
             });
         }
         catch (Exception ex)
@@ -317,8 +293,7 @@ public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadPr
     /// <summary>
     /// Completes the resumable upload by streaming the buffered temp file to GCS atomically.
     /// Note: GCP uses temp file buffering — the actual GCS upload happens here, not during chunk uploads.
-    /// The buffer is not durable across process restarts; if the process restarted after chunks were
-    /// uploaded, this method will fail because the temp file will no longer exist.
+    /// The buffer is not durable across process restarts.
     /// </summary>
     public async Task<StorageResult<UploadResult>> CompleteResumableUploadAsync(
         string uploadId,
@@ -327,43 +302,16 @@ public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadPr
         using var activity = StorageTelemetry.StartActivity("resumable.complete", ProviderName, uploadId);
         try
         {
-            var session = await _sessionStore.GetAsync(uploadId, cancellationToken);
-            if (session is null)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.complete");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session not found");
-                return StorageResult<UploadResult>.Failure($"Upload session '{uploadId}' not found or expired.", StorageErrorCode.FileNotFound);
-            }
-            if (session.IsAborted)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.complete");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session aborted");
-                return StorageResult<UploadResult>.Failure("Upload session has been aborted.", StorageErrorCode.ValidationFailed);
-            }
+            var validation = await ValidateSessionAndBuffer<UploadResult>(uploadId, "resumable.complete", activity, cancellationToken);
+            if (validation.failed is not null) return validation.failed.Value;
 
-            if (!_buffer.TryGetTempPath(uploadId, out var tempPath))
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.complete");
-                activity?.SetStatus(ActivityStatusCode.Error, "Buffer not found");
-                return StorageResult<UploadResult>.Failure("Buffer for upload session not found. Was the process restarted?", StorageErrorCode.ProviderError);
-            }
-
+            var (session, tempPath) = (validation.session!, validation.tempPath!);
             var bucket = session.ProviderData["gcpBucket"];
             var path = session.ProviderData["gcpPath"];
-
-            var uploadObject = new Object
-            {
-                Bucket = bucket,
-                Name = path,
-                ContentType = session.ContentType
-            };
-            if (session.Metadata is not null)
-                uploadObject.Metadata = session.Metadata.ToDictionary(k => k.Key, v => v.Value);
+            var uploadObject = GcpObjectHelper.BuildUploadObject(bucket, path, session.ContentType, session.Metadata);
 
             using (var fs = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read))
-            {
-                var result = await _storageClient.UploadObjectAsync(uploadObject, fs, null, cancellationToken);
-            }
+                await _storageClient.UploadObjectAsync(uploadObject, fs, null, cancellationToken);
 
             _buffer.RemoveSession(uploadId);
             session.IsComplete = true;
@@ -372,11 +320,7 @@ public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadPr
             Logger.LogInformation("[GCP] Completed resumable upload session {UploadId} for {Path}", uploadId, path);
             StorageTelemetry.RecordResumableCompleted(ProviderName);
             activity?.SetStatus(ActivityStatusCode.Ok);
-            return StorageResult<UploadResult>.Success(new UploadResult
-            {
-                Path = path,
-                SizeBytes = session.BytesUploaded
-            });
+            return StorageResult<UploadResult>.Success(new UploadResult { Path = path, SizeBytes = session.BytesUploaded });
         }
         catch (Exception ex)
         {
@@ -426,55 +370,70 @@ public sealed class GCPStorageProvider : BaseStorageProvider, IResumableUploadPr
     // Requires service account credentials (CredentialsPath or CredentialsJson).
     // Application Default Credentials do not support URL signing.
 
+    /// <summary>
+    /// Generates a presigned URL for uploading an object to GCP.
+    /// </summary>
     public Task<StorageResult<string>> GetPresignedUploadUrlAsync(
-        string path, TimeSpan expiration, CancellationToken cancellationToken = default)
-    {
-        if (_urlSigner is null)
-            return Task.FromResult(StorageResult<string>.Failure(
-                "Presigned upload URLs require service account credentials (set CredentialsPath or CredentialsJson).",
-                StorageErrorCode.NotSupported));
+        string path, TimeSpan expiration, CancellationToken cancellationToken = default) =>
+        GcpObjectHelper.PresignedUrl(_urlSigner, _options.Bucket, path, expiration, HttpMethod.Put);
 
-        var url = _urlSigner.Sign(_options.Bucket, path, expiration, HttpMethod.Put);
-        return Task.FromResult(StorageResult<string>.Success(url));
-    }
-
+    /// <summary>
+    /// Generates a presigned URL for downloading an object from GCP.
+    /// </summary>
     public Task<StorageResult<string>> GetPresignedDownloadUrlAsync(
-        string path, TimeSpan expiration, CancellationToken cancellationToken = default)
-    {
-        if (_urlSigner is null)
-            return Task.FromResult(StorageResult<string>.Failure(
-                "Presigned download URLs require service account credentials (set CredentialsPath or CredentialsJson).",
-                StorageErrorCode.NotSupported));
+        string path, TimeSpan expiration, CancellationToken cancellationToken = default) =>
+        GcpObjectHelper.PresignedUrl(_urlSigner, _options.Bucket, path, expiration, HttpMethod.Get);
 
-        var url = _urlSigner.Sign(_options.Bucket, path, expiration, HttpMethod.Get);
-        return Task.FromResult(StorageResult<string>.Success(url));
-    }
-
+    /// <summary>
+    /// Lists objects in GCP with optional prefix filtering and pagination.
+    /// </summary>
     protected override async Task<StorageResult<IReadOnlyList<FileEntry>>> ListFilesCoreAsync(
         string? prefix, ListOptions? options, CancellationToken cancellationToken)
     {
         var entries = new List<FileEntry>();
-
-        var listOptions = new ListObjectsOptions
-        {
-            PageSize = options?.MaxResults
-        };
+        var listOptions = new ListObjectsOptions { PageSize = options?.MaxResults };
 
         await foreach (var obj in _storageClient.ListObjectsAsync(_options.Bucket, prefix, listOptions).WithCancellation(cancellationToken))
         {
-            entries.Add(new FileEntry
-            {
-                Path = obj.Name,
-                SizeBytes = (long)(obj.Size ?? 0),
-                ContentType = obj.ContentType,
-                LastModified = obj.UpdatedDateTimeOffset,
-                ETag = obj.ETag
-            });
-
+            entries.Add(GcpObjectHelper.ToFileEntry(obj));
             if (options?.MaxResults.HasValue == true && entries.Count >= options.MaxResults)
                 break;
         }
 
         return StorageResult<IReadOnlyList<FileEntry>>.Success(entries.AsReadOnly());
+    }
+
+    // ─── Private helpers ──────────────────────────────────────────────────────
+
+    private async Task<(StorageResult<T>? failed, ResumableUploadSession? session, string? tempPath)>
+        ValidateSessionAndBuffer<T>(string uploadId, string operation, Activity? activity, CancellationToken ct)
+    {
+        var session = await _sessionStore.GetAsync(uploadId, ct);
+        if (session is null)
+        {
+            StorageTelemetry.RecordError(ProviderName, operation);
+            activity?.SetStatus(ActivityStatusCode.Error, "Session not found");
+            return (StorageResult<T>.Failure($"Upload session '{uploadId}' not found or expired.", StorageErrorCode.FileNotFound), null, null);
+        }
+        if (session.IsAborted)
+        {
+            StorageTelemetry.RecordError(ProviderName, operation);
+            activity?.SetStatus(ActivityStatusCode.Error, "Session aborted");
+            return (StorageResult<T>.Failure("Upload session has been aborted.", StorageErrorCode.ValidationFailed), null, null);
+        }
+        if (!_buffer.TryGetTempPath(uploadId, out var tempPath))
+        {
+            StorageTelemetry.RecordError(ProviderName, operation);
+            activity?.SetStatus(ActivityStatusCode.Error, "Buffer not found");
+            return (StorageResult<T>.Failure("Buffer for upload session not found. Was the process restarted?", StorageErrorCode.ProviderError), null, null);
+        }
+        return (null, session, tempPath);
+    }
+
+    private static string? ValidateChunkChecksum(byte[] chunkBytes, string? expectedMd5)
+    {
+        if (expectedMd5 is null) return null;
+        var actualMd5 = ChunkChecksumHelper.ComputeMd5Base64(chunkBytes);
+        return ChunkChecksumHelper.Validate(actualMd5, expectedMd5);
     }
 }

@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Net.Http;
 using Amazon.S3;
 using Amazon.S3.Model;
@@ -12,17 +11,31 @@ using ValiBlob.Core.Options;
 using ValiBlob.Core.Pipeline;
 using ValiBlob.Core.Providers;
 using ValiBlob.Core.Resumable;
-using ValiBlob.Core.Telemetry;
 
 namespace ValiBlob.AWS;
 
+/// <summary>
+/// AWS S3 storage provider implementation supporting standard, multipart, resumable uploads and presigned URLs.
+/// </summary>
 public sealed class AWSS3Provider : BaseStorageProvider, IPresignedUrlProvider, IResumableUploadProvider
 {
     private readonly IAmazonS3 _s3Client;
     private readonly AWSS3Options _options;
     private readonly IResumableSessionStore _sessionStore;
-    private readonly ResumableUploadOptions _resumableOptions;
+    private readonly S3ResumableHandler _resumableHandler;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AWSS3Provider"/> class.
+    /// </summary>
+    /// <param name="s3Client">The AWS S3 client.</param>
+    /// <param name="options">S3 configuration options.</param>
+    /// <param name="logger">Logger for diagnostic output.</param>
+    /// <param name="resilienceOptions">Resilience policy configuration.</param>
+    /// <param name="encryptionOptions">Encryption configuration.</param>
+    /// <param name="pipeline">Storage operation pipeline.</param>
+    /// <param name="sessionStore">Resumable upload session storage.</param>
+    /// <param name="resumableOptions">Resumable upload configuration.</param>
+    /// <param name="httpClientFactory">Factory for creating HTTP clients.</param>
     public AWSS3Provider(
         IAmazonS3 s3Client,
         IOptions<AWSS3Options> options,
@@ -38,10 +51,18 @@ public sealed class AWSS3Provider : BaseStorageProvider, IPresignedUrlProvider, 
         _s3Client = s3Client;
         _options = options.Value;
         _sessionStore = sessionStore;
-        _resumableOptions = resumableOptions.Value;
+        _resumableHandler = new S3ResumableHandler(
+            s3Client,
+            options.Value,
+            sessionStore,
+            resumableOptions.Value,
+            logger);
     }
 
-    public override string ProviderName => "AWS";
+    /// <summary>
+    /// Gets the provider name.
+    /// </summary>
+    public override string ProviderName => nameof(StorageProviderType.AWS);
 
     protected override async Task<StorageResult<UploadResult>> UploadCoreAsync(
         UploadRequest request,
@@ -236,6 +257,12 @@ public sealed class AWSS3Provider : BaseStorageProvider, IPresignedUrlProvider, 
         return StorageResult<IReadOnlyList<FileEntry>>.Success(entries.AsReadOnly());
     }
 
+    /// <summary>
+    /// Deletes multiple files in batches, up to 1000 objects per request.
+    /// </summary>
+    /// <param name="paths">Paths to delete.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result with deletion summary.</returns>
     public override async Task<StorageResult<BatchDeleteResult>> DeleteManyAsync(
         IEnumerable<StoragePath> paths,
         CancellationToken cancellationToken = default)
@@ -252,7 +279,6 @@ public sealed class AWSS3Provider : BaseStorageProvider, IPresignedUrlProvider, 
         var errors = new List<BatchDeleteError>();
         var deleted = 0;
 
-        // AWS supports deleting up to 1000 objects at once
         const int batchSize = 1000;
         for (var i = 0; i < pathList.Count; i += batchSize)
         {
@@ -281,287 +307,77 @@ public sealed class AWSS3Provider : BaseStorageProvider, IPresignedUrlProvider, 
 
     // ─── IResumableUploadProvider ───────────────────────────────────────────
 
-    public async Task<StorageResult<ResumableUploadSession>> StartResumableUploadAsync(
-        ResumableUploadRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        using var activity = StorageTelemetry.StartActivity("resumable.start", ProviderName, request.Path);
-        try
-        {
-            var bucket = ResolveBucket(request.BucketOverride, _options.Bucket);
-            var initiateRequest = new InitiateMultipartUploadRequest
-            {
-                BucketName = bucket,
-                Key = request.Path,
-                ContentType = request.ContentType
-            };
-
-            if (request.Metadata is not null)
-            {
-                foreach (var kvp in request.Metadata)
-                    initiateRequest.Metadata[$"x-amz-meta-{kvp.Key}"] = kvp.Value;
-            }
-
-            var response = await _s3Client.InitiateMultipartUploadAsync(initiateRequest, cancellationToken);
-            var expiration = (request.Options?.SessionExpiration ?? _resumableOptions.SessionExpiration);
-
-            var session = new ResumableUploadSession
-            {
-                UploadId = Guid.NewGuid().ToString("N"),
-                Path = request.Path,
-                BucketOverride = request.BucketOverride,
-                TotalSize = request.TotalSize,
-                BytesUploaded = 0,
-                ContentType = request.ContentType,
-                Metadata = request.Metadata,
-                ExpiresAt = DateTimeOffset.UtcNow.Add(expiration),
-                ProviderData = new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["awsUploadId"] = response.UploadId,
-                    ["awsBucket"] = bucket,
-                    ["awsNextPartNum"] = "1",
-                    ["awsParts"] = string.Empty  // accumulated as "partNum:eTag|..."
-                }
-            };
-
-            await _sessionStore.SaveAsync(session, cancellationToken);
-
-            Logger.LogInformation("[AWS] Started resumable upload session {SessionId} for {Path}", session.UploadId, session.Path);
-            StorageTelemetry.RecordResumableStarted(ProviderName);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            return StorageResult<ResumableUploadSession>.Success(session);
-        }
-        catch (Exception ex)
-        {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            StorageTelemetry.RecordError(ProviderName, "resumable.start");
-            Logger.LogError(ex, "[AWS] Failed to start resumable upload for {Path}", request.Path);
-            return StorageResult<ResumableUploadSession>.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
-
-    public async Task<StorageResult<ChunkUploadResult>> UploadChunkAsync(
-        ResumableChunkRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        using var activity = StorageTelemetry.StartActivity("resumable.chunk", ProviderName, request.UploadId);
-        try
-        {
-            var session = await _sessionStore.GetAsync(request.UploadId, cancellationToken);
-            if (session is null)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session not found");
-                return StorageResult<ChunkUploadResult>.Failure($"Upload session '{request.UploadId}' not found or expired.", StorageErrorCode.FileNotFound);
-            }
-            if (session.IsAborted)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session aborted");
-                return StorageResult<ChunkUploadResult>.Failure("Upload session has been aborted.", StorageErrorCode.ValidationFailed);
-            }
-
-            var partNumber = int.Parse(session.ProviderData["awsNextPartNum"]);
-
-            var chunkBytes = await StreamReadHelper.ReadChunkAsync(request.Data, request.Length, cancellationToken)
-                .ConfigureAwait(false);
-
-            var chunkMd5 = ChunkChecksumHelper.ComputeMd5Base64(chunkBytes);
-
-            // Validate against caller-supplied checksum if provided
-            if (request.ExpectedMd5 is not null)
-            {
-                var error = ChunkChecksumHelper.Validate(chunkMd5, request.ExpectedMd5);
-                if (error is not null)
-                {
-                    StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-                    activity?.SetStatus(ActivityStatusCode.Error, error);
-                    return StorageResult<ChunkUploadResult>.Failure(error, StorageErrorCode.ValidationFailed);
-                }
-            }
-
-            using var chunkStream = new MemoryStream(chunkBytes);
-            var uploadPartRequest = new UploadPartRequest
-            {
-                BucketName = session.ProviderData["awsBucket"],
-                Key = session.Path,
-                UploadId = session.ProviderData["awsUploadId"],
-                PartNumber = partNumber,
-                InputStream = chunkStream,
-                IsLastPart = (session.BytesUploaded + chunkBytes.Length) >= session.TotalSize
-            };
-
-            // Send MD5 to S3 for server-side integrity validation
-            if (_resumableOptions.EnableChecksumValidation)
-                uploadPartRequest.MD5Digest = chunkMd5;
-
-            var partResponse = await _s3Client.UploadPartAsync(uploadPartRequest, cancellationToken);
-
-            // Append etag to parts list
-            var partsEntry = $"{partNumber}:{partResponse.ETag.Trim('"')}";
-            var existing = session.ProviderData["awsParts"];
-            session.ProviderData["awsParts"] = string.IsNullOrEmpty(existing) ? partsEntry : $"{existing}|{partsEntry}";
-            session.ProviderData["awsNextPartNum"] = (partNumber + 1).ToString();
-            session.BytesUploaded += chunkBytes.Length;
-
-            await _sessionStore.UpdateAsync(session, cancellationToken);
-
-            StorageTelemetry.RecordResumableChunk(ProviderName, chunkBytes.Length);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-
-            var isReady = session.BytesUploaded >= session.TotalSize;
-            return StorageResult<ChunkUploadResult>.Success(new ChunkUploadResult
-            {
-                UploadId = request.UploadId,
-                BytesUploaded = session.BytesUploaded,
-                TotalSize = session.TotalSize,
-                IsReadyToComplete = isReady
-            });
-        }
-        catch (Exception ex)
-        {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-            Logger.LogError(ex, "[AWS] Chunk upload failed for session {UploadId}", request.UploadId);
-            return StorageResult<ChunkUploadResult>.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
-
+    /// <summary>
+    /// Gets the resumable upload session store.
+    /// </summary>
+    /// <returns>The session store instance.</returns>
     protected override IResumableSessionStore GetSessionStore() => _sessionStore;
 
-    public async Task<StorageResult<UploadResult>> CompleteResumableUploadAsync(
+    /// <summary>
+    /// Initiates a resumable upload session.
+    /// </summary>
+    /// <param name="request">Resumable upload request.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result with resumable upload session details.</returns>
+    public Task<StorageResult<ResumableUploadSession>> StartResumableUploadAsync(
+        ResumableUploadRequest request,
+        CancellationToken cancellationToken = default)
+        => _resumableHandler.StartAsync(request, ProviderName, ResolveBucket, cancellationToken);
+
+    /// <summary>
+    /// Uploads a chunk of data for a resumable upload.
+    /// </summary>
+    /// <param name="request">Chunk upload request.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result with chunk upload details.</returns>
+    public Task<StorageResult<ChunkUploadResult>> UploadChunkAsync(
+        ResumableChunkRequest request,
+        CancellationToken cancellationToken = default)
+        => _resumableHandler.UploadChunkAsync(request, ProviderName, cancellationToken);
+
+    /// <summary>
+    /// Completes a resumable upload.
+    /// </summary>
+    /// <param name="uploadId">The upload session ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result with final upload details.</returns>
+    public Task<StorageResult<UploadResult>> CompleteResumableUploadAsync(
         string uploadId,
         CancellationToken cancellationToken = default)
-    {
-        using var activity = StorageTelemetry.StartActivity("resumable.complete", ProviderName, uploadId);
-        try
-        {
-            var session = await _sessionStore.GetAsync(uploadId, cancellationToken);
-            if (session is null)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.complete");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session not found");
-                return StorageResult<UploadResult>.Failure($"Upload session '{uploadId}' not found or expired.", StorageErrorCode.FileNotFound);
-            }
-            if (session.IsAborted)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.complete");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session aborted");
-                return StorageResult<UploadResult>.Failure("Upload session has been aborted.", StorageErrorCode.ValidationFailed);
-            }
+        => _resumableHandler.CompleteAsync(uploadId, ProviderName, cancellationToken);
 
-            var parts = ParseS3Parts(session.ProviderData["awsParts"]);
-            var completeRequest = new CompleteMultipartUploadRequest
-            {
-                BucketName = session.ProviderData["awsBucket"],
-                Key = session.Path,
-                UploadId = session.ProviderData["awsUploadId"],
-                PartETags = parts
-            };
-
-            var response = await _s3Client.CompleteMultipartUploadAsync(completeRequest, cancellationToken);
-
-            session.IsComplete = true;
-            await _sessionStore.UpdateAsync(session, cancellationToken);
-            await _sessionStore.DeleteAsync(uploadId, cancellationToken);
-
-            Logger.LogInformation("[AWS] Completed resumable upload session {UploadId} for {Path}", uploadId, session.Path);
-            StorageTelemetry.RecordResumableCompleted(ProviderName);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            return StorageResult<UploadResult>.Success(new UploadResult
-            {
-                Path = session.Path,
-                ETag = response.ETag,
-                SizeBytes = session.BytesUploaded
-            });
-        }
-        catch (Exception ex)
-        {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            StorageTelemetry.RecordError(ProviderName, "resumable.complete");
-            Logger.LogError(ex, "[AWS] CompleteResumableUpload failed for session {UploadId}", uploadId);
-            return StorageResult<UploadResult>.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
-
-    public async Task<StorageResult> AbortResumableUploadAsync(
+    /// <summary>
+    /// Aborts a resumable upload and releases all uploaded chunks.
+    /// </summary>
+    /// <param name="uploadId">The upload session ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result of the abort operation.</returns>
+    public Task<StorageResult> AbortResumableUploadAsync(
         string uploadId,
         CancellationToken cancellationToken = default)
-    {
-        using var activity = StorageTelemetry.StartActivity("resumable.abort", ProviderName, uploadId);
-        try
-        {
-            var session = await _sessionStore.GetAsync(uploadId, cancellationToken);
-            if (session is null)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.abort");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session not found");
-                return StorageResult.Failure($"Upload session '{uploadId}' not found or expired.", StorageErrorCode.FileNotFound);
-            }
-
-            await _s3Client.AbortMultipartUploadAsync(
-                session.ProviderData["awsBucket"],
-                session.Path,
-                session.ProviderData["awsUploadId"],
-                cancellationToken);
-
-            await _sessionStore.DeleteAsync(uploadId, cancellationToken);
-            Logger.LogInformation("[AWS] Aborted resumable upload session {UploadId}", uploadId);
-            StorageTelemetry.RecordResumableAborted(ProviderName);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            return StorageResult.Success();
-        }
-        catch (Exception ex)
-        {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            StorageTelemetry.RecordError(ProviderName, "resumable.abort");
-            Logger.LogError(ex, "[AWS] AbortResumableUpload failed for session {UploadId}", uploadId);
-            return StorageResult.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
-
-    private static List<PartETag> ParseS3Parts(string raw)
-    {
-        var parts = new List<PartETag>();
-        if (string.IsNullOrEmpty(raw)) return parts;
-        foreach (var entry in raw.Split('|'))
-        {
-            var idx = entry.IndexOf(':');
-            if (idx < 0) continue;
-            var num = int.Parse(entry.Substring(0, idx));
-            var etag = entry.Substring(idx + 1);
-            parts.Add(new PartETag(num, etag));
-        }
-        return parts;
-    }
+        => _resumableHandler.AbortAsync(uploadId, ProviderName, cancellationToken);
 
     // ─── IPresignedUrlProvider ───────────────────────────────────────────────
 
-    public async Task<StorageResult<string>> GetPresignedUploadUrlAsync(
+    /// <summary>
+    /// Generates a presigned URL for uploading a file.
+    /// </summary>
+    /// <param name="path">The file path in S3.</param>
+    /// <param name="expiration">URL expiration duration.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result with the presigned upload URL.</returns>
+    public Task<StorageResult<string>> GetPresignedUploadUrlAsync(
         string path, TimeSpan expiration, CancellationToken cancellationToken = default)
-    {
-        var url = await _s3Client.GetPreSignedURLAsync(new GetPreSignedUrlRequest
-        {
-            BucketName = _options.Bucket,
-            Key = path,
-            Expires = DateTime.UtcNow.Add(expiration),
-            Verb = HttpVerb.PUT
-        });
+        => S3PresignedUrlHelper.GetPresignedUploadUrlAsync(_s3Client, _options.Bucket, path, expiration);
 
-        return StorageResult<string>.Success(url);
-    }
-
-    public async Task<StorageResult<string>> GetPresignedDownloadUrlAsync(
+    /// <summary>
+    /// Generates a presigned URL for downloading a file.
+    /// </summary>
+    /// <param name="path">The file path in S3.</param>
+    /// <param name="expiration">URL expiration duration.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Result with the presigned download URL.</returns>
+    public Task<StorageResult<string>> GetPresignedDownloadUrlAsync(
         string path, TimeSpan expiration, CancellationToken cancellationToken = default)
-    {
-        var url = await _s3Client.GetPreSignedURLAsync(new GetPreSignedUrlRequest
-        {
-            BucketName = _options.Bucket,
-            Key = path,
-            Expires = DateTime.UtcNow.Add(expiration),
-            Verb = HttpVerb.GET
-        });
-
-        return StorageResult<string>.Success(url);
-    }
+        => S3PresignedUrlHelper.GetPresignedDownloadUrlAsync(_s3Client, _options.Bucket, path, expiration);
 }

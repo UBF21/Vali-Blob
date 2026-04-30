@@ -1,13 +1,9 @@
-using System.Collections.Generic;
-using System.Diagnostics;
 using System.Net.Http;
-using System.Security.Cryptography;
-using System.Text;
 using Azure;
+using Azure.Core;
 using Azure.Storage;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
-using Azure.Storage.Blobs.Specialized;
 using Azure.Storage.Sas;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -17,17 +13,31 @@ using ValiBlob.Core.Options;
 using ValiBlob.Core.Pipeline;
 using ValiBlob.Core.Providers;
 using ValiBlob.Core.Resumable;
-using ValiBlob.Core.Telemetry;
 
 namespace ValiBlob.Azure;
 
+/// <summary>
+/// Azure Blob Storage provider implementation supporting uploads, downloads, presigned URLs, and resumable uploads.
+/// </summary>
 public sealed class AzureBlobProvider : BaseStorageProvider, IPresignedUrlProvider, IResumableUploadProvider
 {
     private readonly BlobServiceClient _serviceClient;
     private readonly AzureBlobOptions _options;
     private readonly IResumableSessionStore _sessionStore;
-    private readonly ResumableUploadOptions _resumableOptions;
+    private readonly AzureResumableHandler _resumableHandler;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AzureBlobProvider"/> class.
+    /// </summary>
+    /// <param name="serviceClient">The Azure Blob Storage service client.</param>
+    /// <param name="options">Azure Blob Storage configuration options.</param>
+    /// <param name="logger">Logger instance for diagnostic messages.</param>
+    /// <param name="resilienceOptions">Resilience and retry configuration.</param>
+    /// <param name="encryptionOptions">Encryption configuration for sensitive data.</param>
+    /// <param name="pipeline">Storage pipeline for processing downloads and uploads.</param>
+    /// <param name="sessionStore">Session store for resumable uploads.</param>
+    /// <param name="resumableOptions">Configuration for resumable upload behavior.</param>
+    /// <param name="httpClientFactory">Factory function for creating HTTP clients.</param>
     public AzureBlobProvider(
         BlobServiceClient serviceClient,
         IOptions<AzureBlobOptions> options,
@@ -43,13 +53,23 @@ public sealed class AzureBlobProvider : BaseStorageProvider, IPresignedUrlProvid
         _serviceClient = serviceClient;
         _options = options.Value;
         _sessionStore = sessionStore;
-        _resumableOptions = resumableOptions.Value;
+        _resumableHandler = new AzureResumableHandler(
+            serviceClient,
+            options.Value,
+            sessionStore,
+            resumableOptions.Value,
+            logger);
     }
 
-    public override string ProviderName => "Azure";
+    /// <summary>
+    /// Gets the name of this storage provider.
+    /// </summary>
+    public override string ProviderName => nameof(StorageProviderType.Azure);
 
     private BlobContainerClient GetContainer(string? containerOverride = null) =>
         _serviceClient.GetBlobContainerClient(ResolveBucket(containerOverride, _options.Container));
+
+    // ─── Core storage operations ─────────────────────────────────────────────
 
     protected override async Task<StorageResult<UploadResult>> UploadCoreAsync(
         UploadRequest request,
@@ -194,6 +214,14 @@ public sealed class AzureBlobProvider : BaseStorageProvider, IPresignedUrlProvid
         return StorageResult<IReadOnlyList<FileEntry>>.Success(entries.AsReadOnly());
     }
 
+    // ─── Batch delete (Azure-optimized with concurrency) ────────────────────
+
+    /// <summary>
+    /// Deletes multiple blobs concurrently with a semaphore-controlled batch operation.
+    /// </summary>
+    /// <param name="paths">Paths of the blobs to delete.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>Result containing deletion statistics and any errors encountered.</returns>
     public override async Task<StorageResult<BatchDeleteResult>> DeleteManyAsync(
         IEnumerable<StoragePath> paths,
         CancellationToken cancellationToken = default)
@@ -242,229 +270,63 @@ public sealed class AzureBlobProvider : BaseStorageProvider, IPresignedUrlProvid
         });
     }
 
-    // ─── IResumableUploadProvider ───────────────────────────────────────────
-
-    public async Task<StorageResult<ResumableUploadSession>> StartResumableUploadAsync(
-        ResumableUploadRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        using var activity = StorageTelemetry.StartActivity("resumable.start", ProviderName, request.Path);
-        try
-        {
-            var container = GetContainer(request.BucketOverride);
-            if (_options.CreateContainerIfNotExists)
-                await container.CreateIfNotExistsAsync(PublicAccessType.None, cancellationToken: cancellationToken);
-
-            var expiration = request.Options?.SessionExpiration ?? _resumableOptions.SessionExpiration;
-            var session = new ResumableUploadSession
-            {
-                UploadId = Guid.NewGuid().ToString("N"),
-                Path = request.Path,
-                BucketOverride = request.BucketOverride,
-                TotalSize = request.TotalSize,
-                BytesUploaded = 0,
-                ContentType = request.ContentType,
-                Metadata = request.Metadata,
-                ExpiresAt = DateTimeOffset.UtcNow.Add(expiration),
-                ProviderData = new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["azureContainer"] = ResolveBucket(request.BucketOverride, _options.Container),
-                    ["azureBlobName"] = request.Path,
-                    ["azureBlockIds"] = string.Empty  // comma-separated base64 block IDs in order
-                }
-            };
-
-            await _sessionStore.SaveAsync(session, cancellationToken);
-            Logger.LogInformation("[Azure] Started resumable upload session {SessionId} for {Path}", session.UploadId, session.Path);
-            StorageTelemetry.RecordResumableStarted(ProviderName);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            return StorageResult<ResumableUploadSession>.Success(session);
-        }
-        catch (Exception ex)
-        {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            StorageTelemetry.RecordError(ProviderName, "resumable.start");
-            Logger.LogError(ex, "[Azure] Failed to start resumable upload for {Path}", request.Path);
-            return StorageResult<ResumableUploadSession>.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
-
-    public async Task<StorageResult<ChunkUploadResult>> UploadChunkAsync(
-        ResumableChunkRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        using var activity = StorageTelemetry.StartActivity("resumable.chunk", ProviderName, request.UploadId);
-        try
-        {
-            var session = await _sessionStore.GetAsync(request.UploadId, cancellationToken);
-            if (session is null)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session not found");
-                return StorageResult<ChunkUploadResult>.Failure($"Upload session '{request.UploadId}' not found or expired.", StorageErrorCode.FileNotFound);
-            }
-            if (session.IsAborted)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session aborted");
-                return StorageResult<ChunkUploadResult>.Failure("Upload session has been aborted.", StorageErrorCode.ValidationFailed);
-            }
-
-            // Block ID: deterministic base64 of the offset (padded to 16 chars for consistent length)
-            var blockIdStr = request.Offset.ToString("D20");
-            var blockId = Convert.ToBase64String(Encoding.UTF8.GetBytes(blockIdStr));
-
-            var chunkBytes = await StreamReadHelper.ReadChunkAsync(request.Data, request.Length, cancellationToken)
-                .ConfigureAwait(false);
-
-            var chunkMd5 = ChunkChecksumHelper.ComputeMd5Base64(chunkBytes);
-
-            // Validate against caller-supplied checksum if provided
-            if (request.ExpectedMd5 is not null)
-            {
-                var error = ChunkChecksumHelper.Validate(chunkMd5, request.ExpectedMd5);
-                if (error is not null)
-                {
-                    StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-                    activity?.SetStatus(ActivityStatusCode.Error, error);
-                    return StorageResult<ChunkUploadResult>.Failure(error, StorageErrorCode.ValidationFailed);
-                }
-            }
-
-            var blockBlobClient = _serviceClient
-                .GetBlobContainerClient(session.ProviderData["azureContainer"])
-                .GetBlockBlobClient(session.ProviderData["azureBlobName"]);
-
-            using var chunkStream = new MemoryStream(chunkBytes);
-
-            // Pass MD5 bytes to Azure for server-side integrity validation
-            byte[]? md5Bytes = _resumableOptions.EnableChecksumValidation
-                ? Convert.FromBase64String(chunkMd5)
-                : null;
-            await blockBlobClient.StageBlockAsync(blockId, chunkStream, md5Bytes, null, null, cancellationToken);
-
-            // Append block ID to ordered list
-            var existing = session.ProviderData["azureBlockIds"];
-            session.ProviderData["azureBlockIds"] = string.IsNullOrEmpty(existing)
-                ? blockId
-                : $"{existing},{blockId}";
-            session.BytesUploaded += chunkBytes.Length;
-
-            await _sessionStore.UpdateAsync(session, cancellationToken);
-
-            StorageTelemetry.RecordResumableChunk(ProviderName, chunkBytes.Length);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-
-            var isReady = session.BytesUploaded >= session.TotalSize;
-            return StorageResult<ChunkUploadResult>.Success(new ChunkUploadResult
-            {
-                UploadId = request.UploadId,
-                BytesUploaded = session.BytesUploaded,
-                TotalSize = session.TotalSize,
-                IsReadyToComplete = isReady
-            });
-        }
-        catch (Exception ex)
-        {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            StorageTelemetry.RecordError(ProviderName, "resumable.chunk");
-            Logger.LogError(ex, "[Azure] Chunk upload failed for session {UploadId}", request.UploadId);
-            return StorageResult<ChunkUploadResult>.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
+    // ─── IResumableUploadProvider — delegates to AzureResumableHandler ───────
 
     protected override IResumableSessionStore GetSessionStore() => _sessionStore;
 
-    public async Task<StorageResult<UploadResult>> CompleteResumableUploadAsync(
+    /// <summary>
+    /// Initiates a resumable upload session.
+    /// </summary>
+    /// <param name="request">Upload request parameters including file metadata.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A resumable upload session with upload ID and configuration.</returns>
+    public Task<StorageResult<ResumableUploadSession>> StartResumableUploadAsync(
+        ResumableUploadRequest request,
+        CancellationToken cancellationToken = default)
+        => _resumableHandler.StartAsync(request, ProviderName, ResolveBucket, cancellationToken);
+
+    /// <summary>
+    /// Uploads a single chunk of a resumable upload.
+    /// </summary>
+    /// <param name="request">Chunk upload request with upload ID and chunk data.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>Upload result for the chunk including position and status.</returns>
+    public Task<StorageResult<ChunkUploadResult>> UploadChunkAsync(
+        ResumableChunkRequest request,
+        CancellationToken cancellationToken = default)
+        => _resumableHandler.UploadChunkAsync(request, ProviderName, cancellationToken);
+
+    /// <summary>
+    /// Completes a resumable upload and finalizes the blob.
+    /// </summary>
+    /// <param name="uploadId">The upload session identifier.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>Final upload result with ETag and file metadata.</returns>
+    public Task<StorageResult<UploadResult>> CompleteResumableUploadAsync(
         string uploadId,
         CancellationToken cancellationToken = default)
-    {
-        using var activity = StorageTelemetry.StartActivity("resumable.complete", ProviderName, uploadId);
-        try
-        {
-            var session = await _sessionStore.GetAsync(uploadId, cancellationToken);
-            if (session is null)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.complete");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session not found");
-                return StorageResult<UploadResult>.Failure($"Upload session '{uploadId}' not found or expired.", StorageErrorCode.FileNotFound);
-            }
-            if (session.IsAborted)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.complete");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session aborted");
-                return StorageResult<UploadResult>.Failure("Upload session has been aborted.", StorageErrorCode.ValidationFailed);
-            }
+        => _resumableHandler.CompleteAsync(uploadId, ProviderName, cancellationToken);
 
-            var blockIds = session.ProviderData["azureBlockIds"].Split(',');
-            var blockBlobClient = _serviceClient
-                .GetBlobContainerClient(session.ProviderData["azureContainer"])
-                .GetBlockBlobClient(session.ProviderData["azureBlobName"]);
-
-            var commitOptions = new CommitBlockListOptions
-            {
-                HttpHeaders = new BlobHttpHeaders { ContentType = session.ContentType },
-                Metadata = session.Metadata?.ToDictionary(k => k.Key, v => v.Value)
-            };
-
-            var response = await blockBlobClient.CommitBlockListAsync(blockIds, commitOptions, cancellationToken);
-
-            session.IsComplete = true;
-            await _sessionStore.DeleteAsync(uploadId, cancellationToken);
-
-            Logger.LogInformation("[Azure] Completed resumable upload session {UploadId} for {Path}", uploadId, session.Path);
-            StorageTelemetry.RecordResumableCompleted(ProviderName);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            return StorageResult<UploadResult>.Success(new UploadResult
-            {
-                Path = session.Path,
-                ETag = response.Value.ETag.ToString(),
-                SizeBytes = session.BytesUploaded
-            });
-        }
-        catch (Exception ex)
-        {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            StorageTelemetry.RecordError(ProviderName, "resumable.complete");
-            Logger.LogError(ex, "[Azure] CompleteResumableUpload failed for session {UploadId}", uploadId);
-            return StorageResult<UploadResult>.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
-
-    public async Task<StorageResult> AbortResumableUploadAsync(
+    /// <summary>
+    /// Aborts an active resumable upload and cleans up temporary resources.
+    /// </summary>
+    /// <param name="uploadId">The upload session identifier to abort.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure of the abort operation.</returns>
+    public Task<StorageResult> AbortResumableUploadAsync(
         string uploadId,
         CancellationToken cancellationToken = default)
-    {
-        using var activity = StorageTelemetry.StartActivity("resumable.abort", ProviderName, uploadId);
-        try
-        {
-            var session = await _sessionStore.GetAsync(uploadId, cancellationToken);
-            if (session is null)
-            {
-                StorageTelemetry.RecordError(ProviderName, "resumable.abort");
-                activity?.SetStatus(ActivityStatusCode.Error, "Session not found");
-                return StorageResult.Failure($"Upload session '{uploadId}' not found or expired.", StorageErrorCode.FileNotFound);
-            }
-
-            // Azure staged blocks expire automatically after 7 days — simply discard the session.
-            // Optionally delete the blob if it was partially committed.
-            await _sessionStore.DeleteAsync(uploadId, cancellationToken);
-            Logger.LogInformation("[Azure] Aborted resumable upload session {UploadId}", uploadId);
-            StorageTelemetry.RecordResumableAborted(ProviderName);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            return StorageResult.Success();
-        }
-        catch (Exception ex)
-        {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            StorageTelemetry.RecordError(ProviderName, "resumable.abort");
-            Logger.LogError(ex, "[Azure] AbortResumableUpload failed for session {UploadId}", uploadId);
-            return StorageResult.Failure(ex.Message, StorageErrorCode.ProviderError, ex);
-        }
-    }
+        => _resumableHandler.AbortAsync(uploadId, ProviderName, cancellationToken);
 
     // ─── IPresignedUrlProvider ───────────────────────────────────────────────
 
+    /// <summary>
+    /// Generates a presigned SAS URL for uploading a blob.
+    /// </summary>
+    /// <param name="path">The blob path.</param>
+    /// <param name="expiration">Time span after which the URL expires.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A presigned URL with write and create permissions.</returns>
     public Task<StorageResult<string>> GetPresignedUploadUrlAsync(
         string path, TimeSpan expiration, CancellationToken cancellationToken = default)
     {
@@ -482,6 +344,13 @@ public sealed class AzureBlobProvider : BaseStorageProvider, IPresignedUrlProvid
         return Task.FromResult(StorageResult<string>.Success(uri.ToString()));
     }
 
+    /// <summary>
+    /// Generates a presigned SAS URL for downloading a blob.
+    /// </summary>
+    /// <param name="path">The blob path.</param>
+    /// <param name="expiration">Time span after which the URL expires.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    /// <returns>A presigned URL with read-only permissions.</returns>
     public Task<StorageResult<string>> GetPresignedDownloadUrlAsync(
         string path, TimeSpan expiration, CancellationToken cancellationToken = default)
     {

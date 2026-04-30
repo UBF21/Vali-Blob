@@ -5,11 +5,21 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using ValiBlob.Core.Abstractions;
 using ValiBlob.Core.DependencyInjection;
+using ValiBlob.Core.Options;
 
 namespace ValiBlob.GCP.Extensions;
 
+/// <summary>
+/// Dependency injection extensions for Google Cloud Storage provider.
+/// </summary>
 public static class ServiceCollectionExtensions
 {
+    /// <summary>
+    /// Registers the GCP storage provider with the ValiBlob dependency injection container.
+    /// </summary>
+    /// <param name="builder">The ValiStorageBuilder instance.</param>
+    /// <param name="configure">Optional configuration action for GCPStorageOptions.</param>
+    /// <returns>The ValiStorageBuilder instance for method chaining.</returns>
     public static ValiStorageBuilder UseGCP(
         this ValiStorageBuilder builder,
         Action<GCPStorageOptions>? configure = null)
@@ -40,7 +50,7 @@ public static class ServiceCollectionExtensions
         });
 
         builder.Services.TryAddSingleton<GCPResumableBuffer>();
-        builder.Services.AddKeyedScoped<IStorageProvider, GCPStorageProvider>("GCP");
+        builder.Services.AddKeyedScoped<IStorageProvider, GCPStorageProvider>(nameof(StorageProviderType.GCP));
 
         return builder;
     }

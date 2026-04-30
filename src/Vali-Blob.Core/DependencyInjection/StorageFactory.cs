@@ -50,9 +50,11 @@ public sealed class StorageFactory : IStorageFactory
         {
             var providers = new List<IStorageProvider>();
 
-            foreach (var providerKey in new[] { "Local", "InMemory", "AWS", "Azure", "GCP", "OCI", "Supabase" })
+            foreach (StorageProviderType providerType in (StorageProviderType[])Enum.GetValues(typeof(StorageProviderType)))
             {
-                var provider = _serviceProvider.GetKeyedService<IStorageProvider>(providerKey);
+                if (providerType is StorageProviderType.None or StorageProviderType.Custom)
+                    continue;
+                var provider = _serviceProvider.GetKeyedService<IStorageProvider>(providerType.ToString());
                 if (provider is not null)
                     providers.Add(ApplyDecorators(provider));
             }
