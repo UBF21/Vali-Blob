@@ -11,6 +11,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.0] - 2026-05-04
+
+### Added
+
+#### Decorators and instrumentation
+- `StorageTelemetryDecorator` — wraps any `IStorageProvider` with OpenTelemetry tracing and metrics via decorator pattern
+- `StorageEventDecorator` — wraps any `IStorageProvider` with event dispatching via decorator pattern
+- `ConflictResolutionOptions` and conflict resolution middleware — rename on conflict, fail on conflict, or overwrite
+- `StorageProviderType` enum — type-safe provider identification; replaces hardcoded string keys in DI registration
+- `PipelineContextKeys` static class — eliminates magic strings in pipeline context items
+
+#### Performance
+- Pipeline caching in `StoragePipelineBuilder` — compiled once, reused per path
+- `InMemoryDeduplicationHashIndex` in `DeduplicationMiddleware` — O(1) lookup replaces O(n) metadata scan
+
+#### Testing
+- Expanded test suite from 315 to 601 tests with negative paths for all core operations
+- Dedicated `CompressionMiddleware` test suite (9 tests)
+- `LocalStorageProvider` integration test suite (17 tests)
+- CI/CD with coverlet integration
+
+#### Developer experience
+- XML documentation on all public API members across all packages
+- All Options classes marked `sealed`
+- `TreatWarningsAsErrors` enabled
+
+### Changed
+
+#### Architecture and SRP
+- `BaseStorageProvider` refactored for Single Responsibility Principle — extracted resilience pipeline factory and composite operations
+- All provider helpers extracted to dedicated internal classes:
+  - **AWS:** `S3ResumableHandler`, `S3PresignedUrlHelper`
+  - **Azure:** `AzureResumableHandler`, `AzureBatchHelper`, `AzureSasHelper`
+  - **GCP:** `GcpObjectHelper`
+  - **OCI:** `OciResumableUploadHandler`, `OciPresignedUrlHandler`, `OciObjectRequestBuilder`
+  - **Supabase:** `SupabaseTusHandler`, `SupabaseHttpHelper`, `SupabaseUrlBuilder`
+  - **Local:** `LocalStorageResumableHandler`, `LocalStorageFolderOperations`, `LocalStorageSidecarHelper`, `LocalStoragePathHelper`
+  - **Testing:** `InMemoryResumableHandler`, `InMemoryStoreOperations`
+- `StorageFactory.GetAll()` now derives provider keys from `StorageProviderType` enum instead of hardcoded array
+
+### Fixed
+
+#### Security
+- **CRITICAL:** `EncryptionMiddleware` now generates random IV per upload instead of reusing the same IV
+- **HIGH:** `AllowedUploadHosts` allowlist in `UploadFromUrlAsync` to prevent SSRF attacks
+- **HIGH:** Chunk offset and length validation in `UploadChunkAsync`
+- **HIGH:** API key authentication on sample app endpoints
+- `RateLimitMiddleware` with sliding window per scope added to pipeline
+- Added `SECURITY.md` documenting security model and best practices
+
+---
+
 ## [1.0.0] - 2026-03-17
 
 ### Added
